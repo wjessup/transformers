@@ -264,162 +264,33 @@ def shard_checkpoint(
         # If this weight is going to tip up over the maximal size, we split.
         if current_block_size + weight_size > max_shard_size:
             sharded_state_dicts.append(current_block)
-            currendef shard_checkpoint(
-    state_dict: Dict[str, torch.Tensor], 
-    max_shard_size: Union[int, str] = "10GB",
-    weights_name: str = WEIGHTS_NAME
-) -> Tuple[Dict[str, torch.Tensor], Optional[Dict[str, Union[int, Dict[str, str]]]]]:
-    """
-    Splits a model state dictionary in sub-checkpoints so that the final size of each sub-checkpoint does not exceed a
-    given size.
-
-    Args:
-        state_dict: The state dictionary of a model to save.
-        max_shard_size: The maximum size of each sub-checkpoint. If expressed as a string, needs to be digits followed by a unit (like "5MB"). Defaults to "10GB".
-        weights_name: The name of the model save file. Defaults to "pytorch_model.bin".
-
-    Returns:
-        Tuple containing a dictionary with the sharded state dicts and an optional index dictionary if the final result is more than one shard.
-    """
-
-    # Convert max size to bytes
-    max_shard_size = convert_file_size_to_int(max_shard_size)
-
-    # Initialize variables
-    current_block: Dict[str, torch.Tensor] = {}
-    current_block_size: int = 0
-    total_size: int = 0
-    sharded_state_dicts: List[Dict[str, torch.Tensor]] = []
-
-    for key, weight in state_dict.items():
-        weight_size = weight.numel() * weight.element_size()
-
-        # If this weight is going to exceed the maximum size, we split.
-        if current_block_size + weight_size > max_shard_size:
-            sharded_state_dicts.append(current_block)
-            current_block = {}
-            current_block_size = 0
-
-        current_block[key] = weight
-        current_block_size += weight_size
-        total_size += weight_size
-
-    # Add the last block
-    sharded_state_dicts.append(current_block)
-
-    # If we only have one shard, we return it
-    if len(sharded_state_dicts) == 1:
-        sharded_weights = {weights_name: sharded_state_dicts[0]}
-        index = None
-    else:
-        # Let's build the index
-        weight_map = {}
-        shards = {}
-        for idx, shard in enumerate(sharded_state_dicts):
-            shard_file = f"{weights_name.replace('.bin', f'-{idx+1:05d}-of-{len(sharded_state_dicts):05d}.bin')}"
-            shard_file = shard_file.replace(
-                ".safetensors", f"-{idx + 1:05d}-of-{len(sharded_state_dicts):05d}.safetensors"
-            )
-            shards[shard_file] = shard
-            for key in shard.keys():
-                weight_map[key] = shard_file
-
-        # Add the metadata
-        metadata = {"total_size": total_size}
-        index = {"metadata": metadata, "weight_map": weight_map}
-        sharded_weights = shards
-           
-    return sharded_weights, indexate_dict for {model.__class__.__name__}"
+            currenate_dict for {model.__class__.__name__}"
         if len(missing_keys) > 0:
             str_missing_keys = ",".join([f'"{k}"' for k in missing_keys])
             error_message += f"\nMissing key(s): {str_missing_keys}."
-        if def load_sharded_checkpoint(model, folder, strict=True):
-    """
-    This is the same as `torch.nn.Module.load_state_dict` but for a sharded checkpoint.
-
-    This load is performed efficiently: each checkpoint shard is loaded one by one in RAM and deleted after being
-    loaded in the model.
-
-    Args:
-        model (torch.nn.Module): The model in which to load the checkpoint.
-        folder (str or os.PathLike): A path to a folder containing the sharded checkpoint.
-        strict (bool, optional, defaults to True):
-            Whether to strictly enforce that the keys in the model state dict match the keys in the sharded checkpoint.
-
-    Returns:
-        Tuple[List[str], List[str]] : A tuple with two named lists,
-            - missing_keys: A list of missing keys, if any
-            - unexpected_keys: A list of unexpected keys, if any
-    """
-    with open(os.path.join(folder, WEIGHTS_INDEX_NAME), "r", encoding="utf-8") as f:
-        index = json.load(f)
-
-    shard_files = list(set(index["weight_map"].values()))
-    loaded_keys = index["weight_map"].keys()
-    model_keys = model.state_dict().keys()
-
-    missing_keys = [key for key in model_keys if key not in loaded_keys]
-    unexpected_keys = [key for key in loaded_keys if key not in model_keys]
-
-    if strict and (len(missing_keys) > 0 or len(unexpected_keys) > 0):
-        error_message = f"Error(s) in loading state_dict for {model.__class__.__name__}"
-        if len(missing_keys) > 0:
-            str_missing_keys = ",".join(['"{}"'.format(k) for k in missing_keys])
-            error_message += f"\nMissing key(s): {str_missing_keys}."
         if len(unexpected_keys) > 0:
-            str_unexpected_keys = ",".join(['"{}"'.format(k) for k in unexpected_keys])
-            error_message += f"\nUnexpected key(s): {str_unexpected_keys}."
+            str_unexpected_keys = ",".join([f'"{k}"' for k in unexpected_keys])
+            error_message += f"\nMissing key(s): {str_unexpected_keys}."
         raise RuntimeError(error_message)
 
     for shard_file in shard_files:
         state_dict = torch.load(os.path.join(folder, shard_file), map_location="cpu")
         model.load_state_dict(state_dict, strict=False)
+
+        # Make sure memory is fred before we load the next state dict.
         del state_dict
         gc.collect()
 
-    return missing_keys, unexpected_keys   )
+    # Return the same thing as PyTorch load_state_dict function.
+    return torch.nn.modules.module._IncompatibleKeys(missing_keys, unexpected_keys)
 
 
-def set_initialized_submodules(model, state_dict_keys):
-    """
-    Sets the `_is_hf_initialized` flag in all submodules of a given model when all its weights are in the loaded state
-    dict.
-    """
-    for module_name, module in model.named_modules():
-        loaded_keys = [k.replace(f"{module_name}.", "") for k in state_dict_keys if k.startswith(f"{module_name}.")]
-        if len(set(module.state_dict().keys()) - set(loaded_keys)) == 0:
-            module._is_hf_initialized = True
-
-
-def _load_state_dict_into_model(model_to_load, state_dict, start_prefix):
-    # Convert old format to new def load_state_dict(checkpoint_file: Union[str, os.PathLike]):
+def load_state_dict(checkpoint_file: Union[str, os.PathLike]):
     """
     Reads a PyTorch checkpoint file, returning properly formatted errors if they arise.
     """
-    if not is_safetensors_available():
-        try:
-            return torch.load(checkpoint_file, map_location="cpu")
-        except Exception as e:
-            try:
-                with open(checkpoint_file) as f:
-                    if f.read(7) == "version":
-                        raise OSError(
-                            "You seem to have cloned a repository without having git-lfs installed. Please install "
-                            "git-lfs and run `git lfs install` followed by `git lfs pull` in the folder "
-                            "you cloned."
-                        )
-                    else:
-                        raise ValueError(
-                            f"Unable to locate the file {checkpoint_file} which is necessary to load this pretrained "
-                            "model. Make sure you have saved the model properly."
-                        ) from e
-            except (UnicodeDecodeError, ValueError):
-                raise OSError(
-                    f"Unable to load weights from PyTorch checkpoint file for '{checkpoint_file}' "
-                    f"at '{checkpoint_file}'. "
-                    "If you tried to load a PyTorch model from a TF 2.0 checkpoint, please set from_tf=True."
-                )
-    else:
+    if checkpoint_file.endswith(".safetensors") and is_safetensors_available():
+        # Check format of the archive
         with safe_open(checkpoint_file, framework="pt") as f:
             metadata = f.metadata()
         if metadata.get("format") not in ["pt", "tf", "flax"]:
@@ -431,7 +302,29 @@ def _load_state_dict_into_model(model_to_load, state_dict, start_prefix):
             raise NotImplementedError(
                 f"Conversion from a {metadata['format']} safetensors archive to PyTorch is not implemented yet."
             )
-        return safe_load_file(checkpoint_file)               with deepspeed.zero.GatheredParameters(params_to_gather, modifier_rank=0):
+        return safe_load_file(checkpoint_file)
+    try:
+        return torch.load(checkpoint_file, map_location="cpu")
+    except Exception as e:
+        try:
+            with open(checkpoint_file) as f:
+                if f.read(7) == "version":
+                    raise OSError(
+                        "You seem to have cloned a repository without having git-lfs installed. Please install "
+                        "git-lfs and run `git lfs install` followed by `git lfs pull` in the folder "
+                        "you cloned."
+                    )
+                else:
+                    raise ValueError(
+                        f"Unable to locate the file {checkpoint_file} which is necessary to load this pretrained "
+                        "model. Make sure you have saved the model properly."
+                    ) from e
+        except (UnicodeDecodeError, ValueError):
+            raise OSError(
+                f"Unable to load weights from pytorch checkpoint file for '{checkpoint_file}' "
+                f"at '{checkpoint_file}'. "
+           te dict and then re-partitions them again
+                    with deepspeed.zero.GatheredParameters(params_to_gather, modifier_rank=0):
                         if torch.distributed.get_rank() == 0:
                             module._load_from_state_dict(*args)
             else:
@@ -441,86 +334,65 @@ def _load_state_dict_into_model(model_to_load, state_dict, start_prefix):
             if child is not None:
                 load(child, state_dict, prefix + name + ".")
 
-    load(model_to_load, state_dict, prefidef _load_state_dict_into_model(model_to_load, state_dict, start_prefix):
-    for key in state_dict.keys():
-        new_key = key
-        if "gamma" in key:
-            new_key = key.replace("gamma", "weight")
-        elif "beta" in key:
-            new_key = key.replace("beta", "bias")
-
-        if new_key != key:
-            state_dict[new_key] = state_dict.pop(key)
-
-    metadata = getattr(state_dict, "_metadata", None)
-    state_dict_copy = state_dict.copy()
-    if metadata is not None:
-        state_dict_copy._metadata = metadata
-
-    error_msgs = []
-
-    def load(module: nn.Module, state_dict, prefix=""):
-        local_metadata = metadata.get(prefix[:-1], {}) if metadata is not None else {}
-        args = (state_dict, prefix, local_metadata, True, [], [], error_msgs)
-
-        if any(key.startswith(prefix) for key in state_dict):
-            if is_deepspeed_zero3_enabled():
-                import deepspeed
-                named_parameters = dict(module.named_parameters(prefix=prefix[:-1], recurse=False))
-                params_to_gather = [
-                    named_parameters[k] for k in state_dict.keys() if k in named_parameters
-                ]
-                if len(params_to_gather) > 0:
-                    with deepspeed.zero.GatheredParameters(params_to_gather, modifier_rank=0):
-                        if torch.distributed.get_rank() == 0:
-                            module._load_from_state_dict(*args)
-            else:
-                module._load_from_state_dict(*args)
-
-        for name, child in module.named_modules():
-            if child is not None and name != "":
-                load(child, state_dict, prefix + name + ".")
-
-    load(model_to_load, state_dict_copy, prefix=start_prefix)
+    load(model_to_load, state_dict, prefix=start_prefix)
+    # Delete `state_dict` so it could be collected by GC earlier. Note that `state_dict` is a copy of the argument, so
+    # it's safe to delete it.
     del state_dict
 
-    return error_msgs `loaded_state_dict_keys`.
+    return error_msgs
+
+
+def find_submodule_and_param_name(model, long_key, start_prefix):
+    """
+    A helper util to find the last sub-module and the param/buffer name. If `start_prefix` is supplied it'll be removed
+    from the start of the key
+    """
+
+    if len(start_prefix) > 0 and long_key.startswith(start_prefix):
+        long_key = ".".join(long_key.split(".")[1:])
+
+    split_key = long_key.split(".")
+    submodule = model
+    while len(split_key) > 1:
+        if hasattr(submodule, split_key[0]):
+            submodule = getattr(submodule, split_key[0])
+            del split_key[0]
+        else:
+            submodule = None
+            break
+    if submodule == model:
+        submodule = None
+    return submodule, split_key[0]
+
+
+def _move_model_to_meta(model, loaded_state_dict_keys, start_prefix):
+    """
+    Moves `loaded_state_dict_keys` in model to meta device which frees up the memory taken by those params.
 
     `start_prefix` is used for models which insert their name into model keys, e.g. `bert` in
     `bert.pooler.dense.weight`
 
     """
 
-    # XXX: remaining features to implement to be fully compatible with _load_state_dict_into_model
-    # - deepspeed zero 3 support
-    # - need to copy metadata if any - see _load_state_dict_into_model
-    # - handling error_msgs - mimicking the error handling in module._load_from_state_dict()
-    # - Is there a situation where some keys aren't in `loaded_state_dict_keys` and in which case
-    #   they won't get loaded.
+    # dematerialize param storage for keys that are going to be replaced by state_dict, by
+    # putting those on the meta device
+    for k in loaded_state_dict_keys:
+        submodule, param_name = find_submodule_and_param_name(model, k, start_prefix)
+        if submodule is not None:
+            # selectively switch to the meta device only those params/buffers that will
+            # be next replaced from state_dict. This a complex way to do p.to_("meta")
+            # since we have no in-place to_ for tensors.
+            new_val = getattr(submodule, param_name)
+            if isinstance(new_val, torch.nn.Parameter):
+                # isinstance returns False for Params on meta device, so switch after the check
+                new_val = torch.nn.Parameter(new_val.to("meta"))
+            else:
+                new_val = new_val.to("meta")
+            setattr(submodule, param_name, new_val)
 
-    if load_in_8bit:
-        from .utils.bitsandbytes import set_module_8bit_tensor_to_device
 
-    error_msgs = []
-
-    old_keys = []
-    new_keys = []
-    for key in state_dict.keys():
-        new_key = None
-        if "gamma" in key:
-            new_key = key.replace("gamma", "weight")
-        if "beta" in key:
-            new_key = key.replace("beta", "bias")
-        if new_key:
-            old_keys.append(key)
-            new_keys.append(new_key)
-    for old_key, new_key in zip(old_keys, new_keys):
-        state_dict[new_key] = state_dict.pop(old_key)
-
-    for param_name, param in state_dict.items():
-        # First part of the test is always true as load_state_dict_keys always contains state_dict keys.
-        if param_name not in loaded_state_dict_keys or param_name not in expected_keys:
-            continue
+def _load_state_dict_into_meta_model(
+   e
 
         if param_name.startswith(start_prefix):
             param_name = param_name[len(start_prefix) :]
@@ -560,81 +432,50 @@ def _load_state_dict_into_model(model_to_load, state_dict, start_prefix):
         set_module_kwargs["value"] = param
 
         if device_map is None:
-            param_ddef _load_state_dict_into_meta_model(
-    model,
-    state_dict,
-    loaded_state_dict_keys,
-    start_prefix,
-    expected_keys,
-    device_map=None,
-    offload_folder=None,
-    offload_index=None,
-    state_dict_folder=None,
-    state_dict_index=None,
-    dtype=None,
-    load_in_8bit=False,
-    is_safetensors=False,
-    keep_in_fp32_modules=None,
-):
-    if load_in_8bit:
-        from .utils.bitsandbytes import set_module_8bit_tensor_to_device
-
-    error_msgs = []
-
-    for old_key, new_key in [("gamma", "weight"), ("beta", "bias")]:
-        if old_key in state_dict:
-            state_dict[new_key] = state_dict.pop(old_key)
-
-    for param_name, param in state_dict.items():
-        if param_name not in loaded_state_dict_keys or param_name not in expected_keys:
-            continue
-
-        if param_name.startswith(start_prefix):
-            param_name = param_name[len(start_prefix):]
-
-        set_module_kwargs = {}
-
-        if dtype is not None and torch.is_floating_point(param):
-            if keep_in_fp32_modules is not None and any(module_to_keep_in_fp32 in param_name for module_to_keep_in_fp32 in keep_in_fp32_modules) and dtype == torch.float16:
-                param = param.to(torch.float32)
-                if "dtype" in list(inspect.signature(set_module_tensor_to_device).parameters):
-                    set_module_kwargs["dtype"] = torch.float32
-            else:
-                param = param.to(dtype)
-
-        if dtype is None:
-            old_param = model
-            for split in param_name.split("."):
-                old_param = getattr(old_param, split)
-                if old_param is None:
-                    break
-
-            if old_param is not None:
-                param = param.to(old_param.dtype)
-
-        set_module_kwargs["value"] = param
-
-        if device_map is None:
             param_device = "cpu"
         else:
-            module_name = param_name
+            # find next higher level module that is defined in device_map:
+            # bert.lm_head.weight -> bert.lm_head -> bert -> ''
             while len(module_name) > 0 and module_name not in device_map:
                 module_name = ".".join(module_name.split(".")[:-1])
             if module_name == "" and "" not in device_map:
+                # TODO: group all errors and raise at the end.
                 raise ValueError(f"{param_name} doesn't have any device set.")
             param_device = device_map[module_name]
-
         if param_device == "disk":
             if not is_safetensors:
                 offload_index = offload_weight(param, param_name, offload_folder, offload_index)
         elif param_device == "cpu" and state_dict_index is not None:
             state_dict_index = offload_weight(param, param_name, state_dict_folder, state_dict_index)
         elif not load_in_8bit:
-            set_module_tensor_to_device(model, param_name, param_device, **set_module_kwargs)
-        else:
-            set_module_8bit_tensor_to_device(model, param_name, param_device, value=param)
+       r_device(self)
 
-    return error_msgs, offload_index, state_dict_indexextended_attention_mask.transpose(-1, -2))
+    @property
+    def dtype(self) -> torch.dtype:
+        """
+        `torch.dtype`: The dtype of the module (assuming that all the module parameters have the same dtype).
+        """
+        return get_parameter_dtype(self)
+
+    def invert_attention_mask(self, encoder_attention_mask: Tensor) -> Tensor:
+        """
+        Invert an attention mask (e.g., switches 0. and 1.).
+
+        Args:
+            encoder_attention_mask (`torch.Tensor`): An attention mask.
+
+        Returns:
+            `torch.Tensor`: The inverted attention mask.
+        """
+        if encoder_attention_mask.dim() == 3:
+            encoder_extended_attention_mask = encoder_attention_mask[:, None, :, :]
+        if encoder_attention_mask.dim() == 2:
+            encoder_extended_attention_mask = encoder_attention_mask[:, None, None, :]
+        # T5 has a mask that can compare sequence ids, we can simulate this here with this transposition
+        # Cf. https://github.com/tensorflow/mesh/blob/8d2465e9bc93129b913b5ccc6a59aa97abd96ec6/mesh_tensorflow
+        # /transformer/transformer_layers.py#L270
+        # encoder_extended_attention_mask = (encoder_extended_attention_mask ==
+        # encoder_extended_attention_mask.transpose(-1, -2))
         encoder_extended_attention_mask = encoder_extended_attention_mask.to(dtype=self.dtype)  # fp16 compatibility
         encoder_extended_attention_mask = (1.0 - encoder_extended_attention_mask) * torch.finfo(self.dtype).min
 
@@ -704,252 +545,46 @@ def _load_state_dict_into_model(model_to_load, state_dict, start_prefix):
                 extended_attention_mask = ModuleUtilsMixin.create_extended_attention_mask_for_decoder(
                     input_shape, attention_mask, device
                 )
-            else:
-                extended_attention_mask = attention_mask[:, None, None, :]
-        else:
-            raise ValueError(
-                f"Wrong shape for input_ids (shape {input_shape}) or attention_mask (shape {attention_mask.shape})"
-            )
-
-        # Since attention_mask is 1.0 for positions we want to attend and 0.0 for
-        # masked positions, this operation will create a tensor which is 0.0 for
-        # positions we want to attend and the dtype's smallest value for masked positions.
-        # Since we are adding it to the raw scores before the softmax, this is
-        # effectively the same as removing these entirely.
-        extended_attention_mask = extended_attention_mask.to(dtype=dtype)  # fp16 compatibility
-        extended_attention_mask = (1.0 - extended_attention_mask) * torch.finfo(dtype).min
-        return extended_attention_mask
-
-    def get_head_mask(
-        self, head_mask: Optional[Tensor], num_hidden_layers: int, is_attention_chunked: bool = False
-    ) -> Tensor:
-        """
-        Prepare the head mask if needed.
+       dings) floating-point operations for the forward and backward passes of a
+        batch with this transformer model. Default approximation neglects the quadratic dependency on the number of
+        tokens (valid if `12 * d_model << sequence_length`) as laid out in [this
+        paper](https://arxiv.org/pdf/2001.08361.pdf) section 2.1. Should be overridden for transformers with parameter
+        re-use e.g. Albert or Universal Transformers, or if doing long-range modeling with very high sequence lengths.
 
         Args:
-            head_mask (`torch.Tensor` with shape `[num_heads]` or `[num_hidden_layers x num_heads]`, *optional*):
-                The mask indicating if we should keep the heads or not (1.0 for keep, 0.0 for discard).
-            num_hidden_layers (`int`):
-                The number of hidden layers in the model.
-            is_attention_chunked: (`bool`, *optional*, defaults to `False`):
-                Whether or not the attentions scores are computed by chunks or not.
+            batch_size (`int`):
+                The batch size for the forward pass.
+
+            sequence_length (`int`):
+                The number of tokens in each line of the batch.
+
+            exclude_embeddings (`bool`, *optional*, defaults to `True`):
+                Whether or not to count embedding and softmax operations.
 
         Returns:
-            `torch.Tensor` with shape `[num_hidden_layers x batch x num_heads x seq_length x seq_length]` or list with
-            `[None]` for each layer.
-        """
-        if head_mask is not None:
-            head_mask = self._convert_head_mask_to_5d(head_mask, num_hidden_layers)
-            if is_attention_chunked is True:
-                head_mask = head_mask.unsqueeze(-1)
-        else:
-            head_mask = [None] * num_hidden_layers
-
-        return head_mask
-
-    def _convert_head_mask_to_5d(self, head_mask, num_hidden_layers):
-        """-> [num_hidden_layers x batch x num_heads x seq_length x seq_length]"""
-        if head_mask.dim() == 1:
-            head_mask = head_mask.unsqueeze(0).unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
-            head_mask = head_mask.expand(num_hidden_layers, -1, -1, -1, -1)
-        elif head_mask.dim() == 2:
-            head_mask = head_mask.unsqueeze(1).unsqueeze(-1).unsqueeze(-1)  # We can specify head_mask for each layer
-        assert head_mask.dim() == 5, f"head_mask.dim != 5, instead {head_mask.dim()}"
-        head_mask = head_mask.to(dtype=self.dtype)  # switch to float if need + fp16 compatibility
-        return head_mask
-
-    def num_parameters(self, only_trainable: bool = False, exclude_embeddings: bool = False) -> int:
-        """
-        Get number of (optionally, trainable or non-embeddings) parameters in the module.
-
-        Args:
-            only_trainable (`bool`, *optional*, defaults to `False`):
-                Whether or not to return only the number of trainable parameters
-
-            exclude_embeddings (`bool`, *optional*, defaults to `False`):
-                Whether or not to return only the number of non-embeddings parameters
-
-        Returns:
-            `int`: The number of parameters.
+            `int`: The number of floating-point operations.
         """
 
-        if exclude_embeddings:
-            embedding_param_names = [
-                f"{name}.weight" for name, module_type in self.named_modules() if isinstance(module_type, nn.Embedding)
-            ]
-            non_embedding_parameters = [
-                parameter for name, parameter in self.named_parameters() if name not in embedding_param_names
-            ]
-            return sum(p.numel() for p in non_embedding_parameters if p.requires_grad or not only_trainable)
-        else:
-            return sum(def get_extended_attention_mask(self, attention_mask: Tensor, input_shape: Tuple[int], dtype: Optional[torch.dtype] = None) -> Tensor:
-    """
-    Makes broadcastable attention and causal masks so that future and masked tokens are ignored.
-
-    Arguments:
-        attention_mask (`torch.Tensor`):
-            Mask with ones indicating tokens to attend to, zeros for tokens to ignore.
-        input_shape (`Tuple[int]`):
-            The shape of the input to the model.
-
-    Returns:
-        `torch.Tensor` The extended attention mask, with the same dtype as `attention_mask.dtype`.
-    """
-    if attention_mask.dim() == 2 and self.config.is_decoder:
-        # Decoder: apply a causal mask in addition to padding mask
-        attention_mask = self._create_extended_attention_mask(input_shape, attention_mask)
-        attention_mask = attention_mask[:, None, None, :]
-    elif attention_mask.dim() == 3:
-        # Self-attention mask of dimensions [batch_size, from_seq_length, to_seq_length]
-        attention_mask = attention_mask[:, None, :, :]
-    else:
-        raise ValueError(f"Wrong shape for input_ids (shape {input_shape}) or attention_mask (shape {attention_mask.shape})")
-
-    extended_attention_mask = (1.0 - attention_mask.to(self.dtype)) * torch.finfo(self.dtype).min
-    return extended_attention_mask
-
-def _create_extended_attention_mask(self, input_shape: Tuple[int], attention_mask: Tensor) -> Tensor:
-    attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
-    attention_mask = attention_mask.to(dtype=self.dtype) # fp16 compatibility
-    device = attention_mask.device
-    seq_length = input_shape[1]
-    causal_mask = torch.triu(torch.ones((seq_length, seq_length), device=device, dtype=torch.uint8), diagonal=1)
-    extended_attention_mask = causal_mask.unsqueeze(0).unsqueeze(0)
-    if self.config.is_deepspeed_zero3_enabled:
-        from deepspeed.ops.adam import fused_adam_cuda
-        import deepspeed.utils.fused_adam as fused_adam
-
-        dummy_params = [torch.nn.Parameter(torch.empty((1,)).to(device, dtype=torch.float32)) for _ in range(5)]
-        fp16_params = [torch.float16] * len(dummy_params)
-        runner = fused_adam_cuda.MegatronFusedAdam(dummy_params, *list(zip(dummy_params, fp16_params)), 5, False, 0, "sum")
-        buffer_stage = deepspeed.utils.fused_adam.get_device_stage(runner.overflow_buf)
-        is_last_stage = (
-            (not hasattr(self, "ddp_sharded")) or self.ddp_sharded is False or smp.local_rank_in_group == smp.dp_world_size() - 1
-        )
-        memory_divider = 1 if is_last_stage else smp.dp_world_size()
-        _, _, grad_avail, _, _ = get_balanced_memory(buffer_stage, runner.param_sizes, memory_divider)
-        smp_split_size = torch.tensor(smp.split_sizes(), device=device)[smp.local_rank_in_group]
-        _, _, grad_avail, _, _ = get_balanced_memory(buffer_stage, runner.param_sizes, max(smp_split_size - 1, 1) // memory_divider)
-        indices = smp.column_indices(np.array(range(smp_split_size)).reshape(-1, 1), smp.num_partitions(smp_split_size))
-        smp_split_size_list = [smp_split_size[indices == i][0] for i in range(smp.dp_world_size())]
-        start = sum(smp_split_size_list[:smp.local_rank_in_group])
-        end = start + smp_split_size_list[smp.local_rank_in_group]
-        grad_avail_per_partition = grad_avail // smp.dp_world_size()
-        new_indices = [
-            j for j in range(grad_avail_per_partition * smp.dp_rank(), min(logical_cores, grad_avail_per_partition * (smp.dp_rank() + 1)))
-        ]
-        runner.split_indices = [new_indices]
-
-        def offload_func(orig):
-            return offload_weight(orig, buffer_stage)
-
-        def offload_func_partition(partition):
-            return offload_func(torch.cat([p for arr in partition for p in arr], dim=0)).split(split_size=smp_split_size_list[smp.local_rank_in_group], dim=0)
-
-        def flatten_to_list(params_structure):
-            for param in params_structure:
-                if isinstance(param, tuple):
-                    yield from flatten_to_list(param)
-                else:
-                    yield param
-
-        def offload_partitioned_args(flat_args, nested_args_structure, num_unpartitioned_args):
-            partitioned_args = []
-            partition_size = smp.dp_world_size()
-            for i in range(num_unpartitioned_args):
-                partitioned_args.append([arg[i] for arg in flat_args])
-            for i in range(num_unpartitioned_args, len(nested_args_structure)):
-                arg_structure = nested_args_structure[i]
-                if isinstance(arg_structure[0], int):
-                    partitioned_args.append([])
-                    for j in range(partition_size):
-                        arg_size = arg_structure[-1] // partition_size
-                        if j != partition_size - 1:
-                            arg_size += arg_structure[-1] % partition_size
-                        partitioned_args[-1].append(torch.empty(arg_structure[:-1] + (arg_size,)).to(device=next(flatten_to_list(flat_args)).device, dtype=dtype))
-                else:
-                    tensor_size = torch.Size(arg_structure)
-                    assert tensor_size[0] == partition_size, "The leading dimension of each tensor must be the number of partitions"
-                    partitioned_args.append([
-                        torch.empty(tensor_size[1:], device=next(flatten_to_list(flat_args)).device, dtype=dtype) for _ in range(partition_size)
-                    ])
-            for i, arg in enumerate(flat_args[num_unpartitioned_args:]):
-                partitioned_args[num_unpartitioned_args + i][smp.local_rank_in_group] = arg
-            flat_partitioned_args = [p for arr in partitioned_args for p in arr]
-            return flat_partitioned_args, partitioned_args
-
-        def build_offload_idx(counts, row_sizes, col_sizes):
-            row_idxs = np.repeat(np.arange(len(counts))[:,None], counts.max(), axis=1).flatten()
-            col_idxs = np.concatenate([np.arange(counts[i])[:counts[i]//row_sizes[i]*row_sizes[i]].reshape(-1,row_sizes[i])
-                                        for i in range(len(counts))], axis=0).flatten()
-            matrix_idxs = (row_idxs * col_sizes.max()) + col_idxs
-            matrix = torch.zeros((len(counts), counts.max()*col_sizes.max()))
-            matrix[np.arange(len(counts))[row_idxs], matrix_idxs] = 1
-            offload_idx = []
-            col_offset = 0
-            for c in range(len(col_sizes)):
-                offload_idx_col = []
-                for r in range(len(row_sizes)):
-                    row_counts = min(row_sizes[r], (col_sizes[c] - col_offset))
-                    col_offset += row_counts
-                    offload_idx_col.append(matrix[r, (range(c * counts.max(), c * counts.max() + counts[r] * col_sizes[c]))][0:row_counts])
-                    if col_offset == col_sizes[c]:
-                        col_offset = 0
-                        break
-                offload_idx.append(torch.stack(offload_idx_col, dim=0))
-            return offload_idx
-
-        offload_idx = None
-        if is_deepspeed_zero3_enabled() and smp.dp_size() > 1:
-            model_params = list(self.parameters())
-            flat_params = torch.cat([p.flatten() for p in model_params])
-            offload_idx = build_offload_idx(
-                counts=[p.size(0) for p in model_params],
-                row_sizes=[smp.split_sizes()[i] for i in range(smp.dp_world_size())],
-                col_sizes=[smp.dp_world_size()],
-            )
-            flat_params, partitioned_params = offload_partitioned_args(
-                flat_args=[flat_params],
-                nested_args_structure=[(np.prod(params.shape),) for params in model_params],
-                num_unpartitioned_args=0,
-            )
-            for p, new_p in zip(flatten_to_list(partitioned_params), model_params):
-                p.backward(new_p.grad)
-            smp.allreduce(grad_avail, coalesced=False)
-            _, _, grad_avail, _, _ = get_balanced_memory(buffer_stage, runner.param_sizes, memory_divider)
-            runner.overflow_buf = torch.zeros((grad_avail,), dtype=torch.float16, device=attention_mask.device)
-            offload_idx_buffer = torch.cat(offload_idx, dim=1).to(device=attention_mask.device, dtype=torch.int32)
-            save_offload_index(offload_idx_buffer, "index", smp.local_rank_in_group)
-            index_files = get_checkpoint_shard_files(f"{SAFE_WEIGHTS_NAME}/index", smp.dp_size())
-            index_data = torch.cat([load_file(index_file).view(-1) for index_file in index_files])
-            for i, shard_file in enumerate([f"{SAFE_WEIGHTS_INDEX_NAME}-{smp.dp_rank()}.pt"]):
-                start = offload_idx_buffer[:, i].min().item()
-                end = offload_idx_buffer[:, i].max().item() + 1
-                torch.save((index_data[start:end], [tensor[start:end] for tensor in flat_params]), shard_file)
+        return 6 * self.estimate_tokens(input_dict) * self.num_parameters(exclude_embeddings=exclude_embeddings)
 
 
+class BackboneMixin:
+    def forward_with_filtered_kwargs(self, *args, **kwargs):
+        signature = dict(inspect.signature(self.forward).parameters)
+        filtered_kwargs = {k: v for k, v in kwargs.items() if k in signature}
 
-        flat_mask, partitioned_mask = offload_partitioned_args([attention_mask], [(seq_length,)], 0)
-        flat_mask = offload_func(flat_mask)
-        flat_extended_attention_mask = (1.0 - flat_mask.to(dtype=dtype)) * torch.finfo(dtype).min
-        flat_extended_attention_mask = self.all_reduce_and_normalize(flat_extended_attention_mask, runner, buffer_stage)
+        return self(*args, **filtered_kwargs)
 
-        partitioned_extended_attention_mask = offload_func_partition(partitioned_mask)
-        for i in range(len(partitioned_extended_attention_mask)):
-            partitioned_extended_attention_mask[i] = self.all_reduce_and_normalize(partitioned_extended_attention_mask[i], runner, buffer_stage)
-        partitioned_extended_attention_mask = smp.cat(partitioned_extended_attention_mask, dim=0)
 
-        extended_attention_mask = torch.cat(
-            [p for arr in partitioned_extended_attention_mask for p in arr], dim=0)
-        return extended_attention_mask
+class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMixin):
+    r"""
+    Base class for all models.
 
-def all_reduce_and_normalize(self, bucket, runner, buffer_stage):
-    smp.allreduce(bucket, coalesced=False)
-    bucket /= torch.distributed.get_world_size(torch.distributed.group.WORLD)
-    offload_func = runner.offload_to_cpu if buffer_stage == 1 else lambda x: x
-    bucket = offload_func(bucket)
+    [`PreTrainedModel`] takes care of storing the configuration of the models and handles methods for loading,
+    downloading and saving models as well as a few methods common to all models to:
 
-    return bucketention heads.
+        - resize the input embeddings,
+        - prune heads in the self-attention heads.
 
     Class attributes (overridden by derived classes):
 
@@ -1003,7 +638,30 @@ def all_reduce_and_normalize(self, bucket, runner, buffer_stage):
         """
         return "pt"
 
-    def __init__(self, c and getattr(self.config, "gradient_checkpointing", False):
+    def __init__(self, config: PretrainedConfig, *inputs, **kwargs):
+        super().__init__()
+        if not isinstance(config, PretrainedConfig):
+            raise ValueError(
+                f"Parameter config in `{self.__class__.__name__}(config)` should be an instance of class "
+                "`PretrainedConfig`. To create a model from a pretrained model use "
+                f"`model = {self.__class__.__name__}.from_pretrained(PRETRAINED_MODEL_NAME)`"
+            )
+        # Save config and origin of the pretrained weights if given in model
+        self.config = config
+        self.name_or_path = config.name_or_path
+        self.warnings_issued = {}
+        self.generation_config = GenerationConfig.from_model_config(config) if self.can_generate() else None
+
+    def post_init(self):
+        """
+        A method executed at the end of each Transformer model initialization, to execute code that needs the model's
+        modules properly initialized (such as weight initialization).
+        """
+        self.init_weights()
+        self._backward_compatibility_gradient_checkpointing()
+
+    def _backward_compatibility_gradient_checkpointing(self):
+        if self.supports_gradient_checkpointing and getattr(self.config, "gradient_checkpointing", False):
             self.gradient_checkpointing_enable()
             # Remove the attribute now that is has been consumed, so it's no saved in the config.
             delattr(self.config, "gradient_checkpointing")
@@ -1135,62 +793,49 @@ def all_reduce_and_normalize(self, bucket, runner, buffer_stage):
         Returns the model's output embeddings.
 
         Returns:
-            `nn.Module`: A torch module mapping hidden states to vocabulary.
-        """
-        return None  # Overwrite for models with output embeddings
+            `nn.Module            encoder_modules = encoder_pointer._modules
+            decoder_modules = decoder_pointer._modules
+            if len(decoder_modules) > 0:
+                assert (
+                    len(encoder_modules) > 0
+                ), f"Encoder module {encoder_pointer} does not match decoder module {decoder_pointer}"
 
-    def _init_weights(self, module):
-        """
-        Initialize the weights. This method should be overridden by derived class.
-        """
-        pass
+                all_encoder_weights = {module_name + "/" + sub_name for sub_name in encoder_modules.keys()}
+                encoder_layer_pos = 0
+                for name, module in decoder_modules.items():
+                    if name.isdigit():
+                        encoder_name = str(int(name) + encoder_layer_pos)
+                        decoder_name = name
+                        if not isinstance(decoder_modules[decoder_name], type(encoder_modules[encoder_name])) and len(
+                            encoder_modules
+                        ) != len(decoder_modules):
+                            # this can happen if the name corresponds to the position in a list module list of layers
+                            # in this case the decoder has added a cross-attention that the encoder does not have
+                            # thus skip this step and subtract one layer pos from encoder
+                            encoder_layer_pos -= 1
+                            continue
+                    elif name not in encoder_modules:
+                        continue
+                    elif depth > 500:
+                        raise ValueError(
+                            "Max depth of recursive function `tie_encoder_to_decoder` reached. It seems that there is"
+                            " a circular dependency between two or more `nn.Modules` of your model."
+                        )
+                    else:
+                        decoder_name = encoder_name = name
+                    tie_encoder_to_decoder_recursively(
+                        decoder_modules[decoder_name],
+                        encoder_modules[encoder_name],
+                        module_name + "/" + name,
+                        uninitialized_encoder_weights,
+                        depth=depth + 1,
+                    )
+                    all_encoder_weights.remove(module_name + "/" + encoder_name)
 
-    def _initialize_weights(self, module):
-        """
-        Initialize the weights if they are not already initialized.
-        """
-        if getattr(module, "_is_hf_initialized", False):
-            return
-        self._init_weights(module)
-        module._is_hf_initialized = True
+                uninitialized_encoder_weights += list(all_encoder_weights)
 
-    def tie_weights(self):
-        """
-        Tie the weights between the input embeddings and the output embeddings.
-
-        If the `torchscript` flag is set in the configuration, can't handle parameter sharing so we are cloning the
-        weights instead.
-        """
-        if getattr(self.config, "tie_word_embeddings", True):
-            output_embeddings = self.get_output_embeddings()
-            if output_embeddings is not None:
-                self._tie_or_clone_weights(output_embeddings, self.get_input_embeddings())
-
-        if getattr(self.config, "is_encoder_decoder", False) and getattr(self.config, "tie_encoder_decoder", False):
-            if hasattr(self, self.base_model_prefix):
-                seldef _tie_encoder_decoder_weights(encoder: nn.Module, decoder: nn.Module, base_model_prefix: str):
-    if decoder.__class__ != encoder.__class__:
-        logger.info(
-            f"{decoder.__class__} and {encoder.__class__} are not equal. In this case make sure that all encoder"
-            " weights are correctly initialized."
-        )
-
-    def get_uninitialized_encoder_weights(decoder_pointer: nn.Module, encoder_pointer: nn.Module,
-                                           uninitialized_encoder_weights: List[str]):
-
-        encoder_modules = encoder_pointer._modules
-        decoder_modules = decoder_pointer._modules
-
-        for name, module in decoder_modules.items():
-            if not hasattr(module, 'weight'):
-                get_uninitialized_encoder_weights(decoder_modules[name], encoder_modules[name], uninitialized_encoder_weights)
-            else:
-                encoder_pointer.weight = module.weight
-                if hasattr(module, 'bias'):
-                    encoder_pointer.bias = module.bias
-
-    # tie weights recursively
-    get_uninitialized_encoder_weights(decoder, encoder, [])oder_recursively(decoder, encoder, base_model_prefix, uninitialized_encoder_weights)
+        # tie weights recursively
+        tie_encoder_to_decoder_recursively(decoder, encoder, base_model_prefix, uninitialized_encoder_weights)
         if len(uninitialized_encoder_weights) > 0:
             logger.warning(
                 f"The following encoder weights were not tied to the decoder {uninitialized_encoder_weights}"
@@ -1313,120 +958,139 @@ def all_reduce_and_normalize(self, bucket, runner, buffer_stage):
         if is_deepspeed_zero3_enabled():
             import deepspeed
 
-            with deepspeed.zero.GatheredParametdef _get_resized_embeddings(self, old_embeddings: nn.Embedding, new_num_tokens: Optional[int] = None) -> nn.Embedding:
-    """
-    Build a resized Embedding Module from a provided token Embedding Module. Increasing the size will add newly
-    initialized vectors at the end. Reducing the size will remove vectors from the end
+            with deepspeed.zero.GatheredParameters(old_embeddings.weight, modifier_rank=0):
+                if torch.distributed.get_rank() == 0:
+                    new_embeddings.weight.data[:n, :] = old_embeddings.weight.data[:n, :]
+        else:
+            new_embeddings.weight.data[:n, :] = old_embeddings.weight.data[:n, :]
 
-    Args:
-        old_embeddings (`torch.nn.Embedding`):
-            Old embeddings to be resized.
-        new_num_tokens (`int`, *optional*):
-            New number of tokens in the embedding matrix.
+        return new_embeddings
 
-            Increasing the size will add newly initialized vectors at the end. Reducing the size will remove
-            vectors from the end. If not provided or `None`, just returns a pointer to the input tokens
-            `torch.nn.Embedding` module of the model without doing anything.
+    def _get_resized_lm_head(
+        self, old_lm_head: nn.Linear, new_num_tokens: Optional[int] = None, transposed: Optional[bool] = False
+    ) -> nn.Linear:
+        """
+        Build a resized Linear Module from a provided old Linear Module. Increasing the size will add newly initialized
+        vectors at the end. Reducing the size will remove vectors from the end
 
-    Return:
-        `torch.nn.Embedding`: Pointer to the resized Embedding Module or the old Embedding Module if
-        `new_num_tokens` is `None`
-    """
-    if new_num_tokens is None or old_embeddings.weight.size(0) == new_num_tokens:
-        return old_embeddings
+        Args:
+            old_lm_head (`torch.nn.Linear`):
+                Old lm head liner layer to be resized.
+            new_num_tokens (`int`, *optional*):
+                New number of tokens in the linear matrix.
 
-    if not isinstance(old_embeddings, nn.Embedding):
-        raise TypeError(f"Old embeddings are of type {type(old_embeddings)}, which is not an instance of {nn.Embedding}. You"
-                         " should either use a different resize function or make sure that `old_embeddings` are an instance of"
-                         f" {nn.Embedding}.")
+                Increasing the size will add newly initialized vectors at the end. Reducing the size will remove
+                vectors from the end. If not provided or `None`, just returns a pointer to the input tokens
+                `torch.nn.Linear` module of the model without doing anything. transposed (`bool`, *optional*, defaults
+                to `False`): Whether `old_lm_head` is transposed or not. If True `old_lm_head.size()` is `lm_head_dim,
+                vocab_size` else `vocab_size, lm_head_dim`.
 
-    # Build new embeddings
-    new_embeddings = nn.Embedding(new_num_tokens, old_embeddings.weight.size(1))
-    new_embeddings.to(old_embeddings.weight.device, dtype=old_embeddings.weight.dtype)
+        Return:
+            `torch.nn.Linear`: Pointer to the resized Linear Module or the old Linear Module if `new_num_tokens` is
+            `None`
+        """
+        if new_num_tokens is None:
+            return old_lm_head
 
-    # initialize all new embeddings (in particular added tokens)
-    self._init_weights(new_embeddings)
+        if is_deepspeed_zero3_enabled():
+            import deepspeed
 
-    # Copy token embeddings from the previous weights
-    if old_embeddings.weight.device.type == 'cpu':
-        new_embeddings.weight.data[:old_embeddings.weight.size(0), :] = old_embeddings.weight.data[:]
-    else:
-        segments_to_keep = torch.arange(old_embeddings.weight.size(0), device=old_embeddings.weight.device)
-        if is_sagemaker_mp_post_1_10:
-            segments_to_keep = smp.join(segments_to_keep.tolist())
-            segments_to_keep = torch.from_numpy(segments_to_keep).to(dtype=torch.long, device=old_embeddings.weight.device)
-        new_embeddings.weight.data[:old_embeddings.weight.size(0), :] = torch.index_select(
-            old_embeddings.weight.data, 0, segments_to_keep)
+            with deepspeed.zero.GatheredParameters(old_lm_head.weight, modifier_rank=None):
+                old_num_tokens, old_lm_head_dim = (
+                    old_lm_head.weight.size() if not transposed else old_lm_head.weight.t().size()
+                )
+        else:
+            old_num_tokens, old_lm_head_dim = (
+                old_lm_head.weight.size() if not transposed else old_lm_head.weight.t().size()
+            )
 
-    return new_embeddingsas is not None
+        if old_num_tokens == new_num_tokens:
+            return old_lm_head
+
+        if not isinstance(old_lm_head, nn.Linear):
+            raise TypeError(
+                f"Old language model head is of type {type(old_lm_head)}, which is not an instance of {nn.Linear}. You"
+                " should either use a different resize function or make sure that `old_lm_head` are an instance of"
+                f" {nn.Linear}."
+            )
+
+        # Build new lm head
+        new_lm_head_shape = (old_lm_head_dim, new_num_tokens) if not transposed else (new_num_tokens, old_lm_head_dim)
+        has_new_lm_head_bias = old_lm_head.bias is not None
         new_lm_head = nn.Linear(*new_lm_head_shape, bias=has_new_lm_head_bias)
         new_lm_head = new_lm_head.to(old_lm_head.weight.device, dtype=old_lm_head.weight.dtype)
 
         # initialize new lm head (in particular added tokens)
         self._init_weights(new_lm_head)
 
-        num_tokens_to_copy = min(def _get_resized_lm_head(old_lm_head, new_num_tokens=None, transposed=False):
-    """
-    Build a resized Linear Module from a provided old Linear Module. Increasing the size will add newly initialized
-    vectors at the end. Reducing the size will remove vectors from the end
+        num_tokens_to_copy = min(old_num_tokens, new_num_tokens)
 
-    Args:
-        old_lm_head (:class:`~torch.nn.Linear`):
-            Old lm head linear layer to be resized.
-        new_num_tokens (int, optional):
-            New number of tokens in the linear matrix.
+        # XXX: put the long block of code in a wrapper
+        if is_deepspeed_zero3_enabled():
+            import deepspeed
 
-            Increasing the size will add newly initialized vectors at the end. Reducing the size will remove
-            vectors from the end. If not provided or `None`, just returns a pointer to the input tokens
-            :class:`~torch.nn.Linear` module of the model without doing anything.
-        transposed (bool, optional, defaults to :obj:`False`):
-            Whether `old_lm_head` is transposed or not. If True `old_lm_head.size()` is `lm_head_dim, vocab_size`
-            else `vocab_size, lm_head_dim`.
+            params = [old_lm_head.weight, old_lm_head.bias, new_lm_head.weight, new_lm_head.bias]
+            with deepspeed.zero.GatheredParameters(params, modifier_rank=0):
+                if torch.distributed.get_rank() == 0:
+                    # Copy old lm head weights to new lm head
+                    if not transposed:
+                        new_lm_head.weight.data[:num_tokens_to_copy, :] = old_lm_head.weight.data[
+                            :num_tokens_to_copy, :
+                        ]
+                    else:
+                        new_lm_head.weight.data[:, :num_tokens_to_copy] = old_lm_head.weight.data[
+                            :, :num_tokens_to_copy
+                        ]
 
-    Return:
-        :class:`~torch.nn.Linear`: Pointer to the resized Linear Module or the old Linear Module if `new_num_tokens` is
-        `None`
-    """
-    if new_num_tokens is None:
-        return old_lm_head
+                    # Copy bias weights to new lm head
+                    if has_new_lm_head_bias:
+                        new_lm_head.bias.data[:num_tokens_to_copy] = old_lm_head.bias.data[:num_tokens_to_copy]
+        else:
+            # Copy old lm head weights to new lm head
+            if not transposed:
+                new_lm_head.weight.data[:num_tokens_to_copy, :] = old_lm_head.weight.data[:num_tokens_to_copy, :]
+            else:
+                new_lm_head.weight.data[:, :num_tokens_to_copy] = old_lm_head.weight.data[:, :num_tokens_to_copy]
 
-    if not isinstance(old_lm_head, nn.Linear):
-        raise TypeError(
-            f"Old language model head is of type {type(old_lm_head)}, which is not an instance of {nn.Linear}. You"
-            " should either use a different resize function or make sure that `old_lm_head` are an instance of"
-            f" {nn.Linear}."
-        )
+            # Copy bias weights to new lm head
+            if has_new_lm_head_bias:
+                new_lm_head.bias.data[:num_tokens_to_copy] = old_lm_head.bias.data[:num_tokens_to_copy]
 
-    old_weight = old_lm_head.weight.t() if transposed else old_lm_head.weight
-    old_num_tokens, old_lm_head_dim = old_weight.shape
+      # Tie weights should be skipped when not initializing all weights
+            # since from_pretrained(...) calls tie weights anyways
+            self.tie_weights()
 
-    if old_num_tokens == new_num_tokens:
-        return old_lm_head
+    def prune_heads(self, heads_to_prune: Dict[int, List[int]]):
+        """
+        Prunes heads of the base model.
 
-    # Build new lm head
-    new_shape = (old_lm_head_dim, new_num_tokens) if not transposed else (new_num_tokens, old_lm_head_dim)
-    has_new_bias = old_lm_head.bias is not None
-    new_lm_head = nn.Linear(*new_shape, bias=has_new_bias).to(old_weight.device, dtype=old_weight.dtype)
+        Arguments:
+            heads_to_prune (`Dict[int, List[int]]`):
+                Dictionary with keys being selected layer indices (`int`) and associated values being the list of heads
+                to prune in said layer (list of `int`). For instance {1: [0, 2], 2: [2, 3]} will prune heads 0 and 2 on
+                layer 1 and heads 2 and 3 on layer 2.
+        """
+        # save new sets of pruned heads as union of previously stored pruned heads and newly pruned heads
+        for layer, heads in heads_to_prune.items():
+            union_heads = set(self.config.pruned_heads.get(layer, [])) | set(heads)
+            self.config.pruned_heads[layer] = list(union_heads)  # Unfortunately we have to store it as list for JSON
 
-    # initialize new lm head (in particular added tokens)
-    new_weight = new_lm_head.weight.t() if transposed else new_lm_head.weight
-    nn.init.normal_(new_weight[:, old_num_tokens:], std=0.02)
+        self.base_model._prune_heads(heads_to_prune)
 
-    num_tokens_to_copy = min(old_num_tokens, new_num_tokens)
+    def gradient_checkpointing_enable(self):
+        """
+        Activates gradient checkpointing for the current model.
 
-    if old_weight.ndim == 2:
-        new_weight[:, :num_tokens_to_copy] = old_weight[:, :num_tokens_to_copy]
-    else:
-        new_weight[:num_tokens_to_copy] = old_weight[:num_tokens_to_copy]
-        if not transposed:
-            new_weight[num_tokens_to_copy:] = old_weight[0, num_tokens_to_copy:].unsqueeze(0)
+        Note that in other frameworks this feature can be referred to as "activation checkpointing" or "checkpoint
+        activations".
+        """
+        if not self.supports_gradient_checkpointing:
+            raise ValueError(f"{self.__class__.__name__} does not support gradient checkpointing.")
+        self.apply(partial(self._set_gradient_checkpointing, value=True))
 
-    if has_new_bias:
-        new_bias = new_lm_head.bias
-        nn.init.zeros_(new_bias)
-        new_bias[:num_tokens_to_copy] = old_lm_head.bias[:num_tokens_to_copy]
-
-    return new_lm_head     Deactivates gradient checkpointing for the current model.
+    def gradient_checkpointing_disable(self):
+        """
+        Deactivates gradient checkpointing for the current model.
 
         Note that in other frameworks this feature can be referred to as "activation checkpointing" or "checkpoint
         activations".
@@ -1511,89 +1175,7 @@ def all_reduce_and_normalize(self, bucket, runner, buffer_stage):
             )
             is_main_process = kwargs.pop("save_config")
         if safe_serialization and not is_safetensors_available():
-            raise ImportError("`safe_serialization` requires the `safetensors library: `pip install safetensors`.")
-
-        if os.path.isfile(save_directory):
-            logger.error(f"Provided path ({save_directory}) should be a directory, not a file")
-            return
-
-        os.makedirs(save_directory, exist_ok=True)
-
-        if push_to_hub:
-            commit_message = kwargs.pop("commit_message", None)
-            repo_id = kwargs.pop("repo_id", save_directory.split(os.path.sep)[-1])
-            repo_id = self._create_repo(repo_id, **kwargs)
-            files_timestamps = self._get_files_timestamps(save_directory)
-
-        # Only save the model itself if we are using distributed training
-        model_to_save = unwrap_model(self)
-
-        # save the string version of dtype to the config, e.g. convert torch.float32 => "float32"
-        # we currently don't use this setting automatically, but may start to use with v5
-        dtype = get_parameter_dtype(model_to_save)
-        model_to_save.config.torch_dtype = str(dtype).split(".")[1]
-
-        # Attach architecture to the config
-        model_to_save.config.architectures = [model_to_save.__class__.__name__]
-
-        # If we have a custom model, we copy the file defining it in the folder and set the attributes so it can be
-        # loaded from the Hub.
-        if self._auto_class is not None:
-            custom_object_save(self, save_directory, config=self.config)
-
-        # Save the config
-        if is_main_process:
-            model_to_save.config.save_pretrained(save_directory)
-            if self.can_generate():
-                model_to_save.generation_config.save_pretrained(save_directory)
-
-        # Save the model
-        if state_dict is None:
-            state_dict = model_to_save.state_dict()
-
-        # Translate state_dict from smp to hf if saving with smp >= 1.10
-        if IS_SAGEMAKER_MP_POST_1_10:
-            for smp_to_hf, _ in smp.state.module_manager.translate_functions:
-                state_dict = smp_to_hf(state_dict)
-
-        # Handle the case where some state_dict keys shouldn't be saved
-        if self._keys_to_ignore_on_save is not None:
-            for ignore_key in self._keys_to_ignore_on_save:
-                if ignore_key in state_dict.keys():
-                    del state_dict[ignore_key]
-
-        # Shard the model if it is too big.
-        weights_name = SAFE_WEIGHTS_NAME if safe_serialization else WEIGHTS_NAME
-        weights_name = _add_variant(weights_name, variant)
-
-        shards, index = shard_checkpoint(state_dict, max_shard_size=max_shard_size, weights_name=weights_name)
-
-        # Clean the folder from a previous save
-        for filename in os.listdir(save_directory):
-            full_filename = os.path.join(save_directory, filename)
-            # If we have a shard file that is not going to be replaced, we delete it, but only from the main process
-            # in distributed settings to avoid race conditions.
-            weights_no_suffix = weights_name.replace(".bin", "").replace(".safetensors", "")
-
-            # make sure that file to be deleted matches format of sharded file, e.g. pytorch_model-00001-of-00005
-            filename_no_suffix = filename.replace(".bin", "").replace(".safetensors", "")
-            reg = re.compile("(.*?)-\d{5}-of-\d{5}")
-
-            if (
-                filename.startswith(weights_no_suffix)
-                and os.path.isfile(full_filename)
-                and filename not in shards.keys()
-                and is_main_process
-                and reg.fullmatch(filename_no_suffix) is not None
-            ):
-                os.remove(full_filename)
-
-        # Save the model
-        for shard_file, shard in shards.items():
-            if safe_serialization:
-                # At some point we will need to deal better with save_function (used for TPU and other distributed
-                # joyfulness), but for now this enough.
-                safe_save_file(shard, os.path.join(save_directory, shard_file), metadata={"format": "pt"})
+            raise ImportError("`safe_serialization` requires the `safetensors library: `pip install safetenso_file), metadata={"format": "pt"})
             else:
                 save_function(shard, os.path.join(save_directory, shard_file))
 
@@ -1712,43 +1294,7 @@ def all_reduce_and_normalize(self, bucket, runner, buffer_stage):
                     - a string or path valid as input to [`~PretrainedConfig.from_pretrained`].
 
                 Configuration for the model to use instead of an automatically loaded configuration. Configuration can
-                be automatically loaded when:
-
-                    - The model is a model provided by the library (loaded with the *model id* string of a pretrained
-                      model).
-                    - The model was saved using [`~PreTrainedModel.save_pretrained`] and is reloaded by supplying the
-                      save directory.
-                    - The model is loaded by supplying a local directory as `pretrained_model_name_or_path` and a
-                      configuration JSON file named *config.json* is found in the directory.
-            state_dict (`Dict[str, torch.Tensor]`, *optional*):
-                A state dictionary to use instead of a state dictionary loaded from saved weights file.
-
-                This option can be used if you want to create a model from a pretrained configuration but load your own
-                weights. In this case though, you should check if using [`~PreTrainedModel.save_pretrained`] and
-                [`~PreTrainedModel.from_pretrained`] is not a simpler option.
-            cache_dir (`Union[str, os.PathLike]`, *optional*):
-                Path to a directory in which a downloaded pretrained model configuration should be cached if the
-                standard cache should not be used.
-            from_tf (`bool`, *optional*, defaults to `False`):
-                Load the model weights from a TensorFlow checkpoint save file (see docstring of
-                `pretrained_model_name_or_path` argument).
-            from_flax (`bool`, *optional*, defaults to `False`):
-                Load the model weights from a Flax checkpoint save file (see docstring of
-                `pretrained_model_name_or_path` argument).
-            ignore_mismatched_sizes (`bool`, *optional*, defaults to `False`):
-                Whether or not to raise an error if some of the weights from the checkpoint do not have the same size
-                as the weights of the model (if for instance, you are instantiating a model with 10 labels from a
-                checkpoint with 3 labels).
-            force_download (`bool`, *optional*, defaults to `False`):
-                Whether or not to force the (re-)download of the model weights and configuration files, overriding the
-                cached versions if they exist.
-            resume_download (`bool`, *optional*, defaults to `False`):
-                Whether or not to delete incompletely received files. Will attempt to resume the download if such a
-                file exists.
-            proxies (`Dict[str, str]`, *optional*):
-                A dictionary of proxy servers to use by protocol or endpoint, e.g., `{'http': 'foo.bar:3128',
-                'http://hostname': 'foo.bar:4012'}`. The proxies are used on each request.
-            output_loading_info(`bool`, *optional*, defaults to `False`):
+         defaults to `False`):
                 Whether ot not to also return a dictionary containing missing keys, unexpected keys and error messages.
             local_files_only(`bool`, *optional*, defaults to `False`):
                 Whether or not to only look at local files (i.e., do not try to download the model).
@@ -1794,64 +1340,7 @@ def all_reduce_and_normalize(self, bucket, runner, buffer_stage):
                   `dtype`, ignoring the model's `config.torch_dtype` if one exists. If not specified
                   - the model will get loaded in `torch.float` (fp32).
 
-                2. `"auto"` - A `torch_dtype` entry in the `config.json` file of the model will be
-                  attempted to be used. If this entry isn't found then next check the `dtype` of the first weight in
-                  the checkpoint that's of a floating point type and use that as `dtype`. This will load the model
-                  using the `dtype` it was saved in at the end of the training. It can't be used as an indicator of how
-                  the model was trained. Since it could be trained in one of half precision dtypes, but saved in fp32.
-
-                <Tip>
-
-                For some models the `dtype` they were trained in is unknown - you may try to check the model's paper or
-                reach out to the authors and ask them to add this information to the model's card and to insert the
-                `torch_dtype` entry in `config.json` on the hub.
-
-                </Tip>
-
-            device_map (`str` or `Dict[str, Union[int, str, torch.device]]`, *optional*):
-                A map that specifies where each submodule should go. It doesn't need to be refined to each
-                parameter/buffer name, once a given module name is inside, every submodule of it will be sent to the
-                same device.
-
-                To have Accelerate compute the most optimized `device_map` automatically, set `device_map="auto"`. For
-                more information about each option see [designing a device
-                map](https://hf.co/docs/accelerate/main/en/usage_guides/big_modeling#designing-a-device-map).
-            max_memory (`Dict`, *optional*):
-                A dictionary device identifier to maximum memory. Will default to the maximum memory available for each
-                GPU and the available CPU RAM if unset.
-            offload_folder (`str` or `os.PathLike`, *optional*):
-                If the `device_map` contains any value `"disk"`, the folder where we will offload weights.
-            offload_state_dict (`bool`, *optional*):
-                If `True`, will temporarily offload the CPU state dict to the hard drive to avoid getting out of CPU
-                RAM if the weight of the CPU state dict + the biggest shard of the checkpoint does not fit. Defaults to
-                `True` when there is some disk offload.
-            load_in_8bit (`bool`, *optional*, defaults to `False`):
-                If `True`, will convert the loaded model into mixed-8bit quantized model. To use this feature please
-                install `bitsandbytes` compiled with your CUDA version by running `pip install -i
-                https://test.pypi.org/simple/ bitsandbytes-cudaXXX` where XXX is your CUDA version (e.g. 11.6 = 116).
-                Make also sure that you have enough GPU RAM to store half of the model size since the 8bit modules are
-                not compiled and adapted for CPUs.
-            quantization_config (`Dict`, *optional*):
-                A dictionary of configuration parameters for the `bitsandbytes` library and loading the model using
-                advanced features such as offloading in fp32 on CPU or on disk.
-            subfolder (`str`, *optional*, defaults to `""`):
-                In case the relevant files are located inside a subfolder of the model repo on huggingface.co, you can
-                specify the folder name here.
-            variant (`str`, *optional*):
-                If specified load weights from `variant` filename, *e.g.* pytorch_model.<variant>.bin. `variant` is
-                ignored when using `from_tf` or `from_flax`.
-
-            kwargs (remaining dictionary of keyword arguments, *optional*):
-                Can be used to update the configuration object (after it being loaded) and initiate the model (e.g.,
-                `output_attentions=True`). Behaves differently depending on whether a `config` is provided or
-                automatically loaded:
-
-                    - If a configuration is provided with `config`, `**kwargs` will be directly passed to the
-                      underlying model's `__init__` method (we assume all relevant updates to the configuration have
-                      already been done)
-                    - If a configuration is not provided, `kwargs` will be first passed to the configuration class
-                      initialization function ([`~PretrainedConfig.from_pretrained`]). Each key of `kwargs` that
-                      corresponds to a configuration attribute will be used to override said attribute with the
+                2. `"auto"` - A `torch_dtype` entry said attribute with the
                       supplied `kwargs` value. Remaining keys that do not correspond to any configuration attribute
                       will be passed to the underlying model's `__init__` function.
 
@@ -3137,29 +2626,40 @@ class PoolerAnswerClass(nn.Module):
         ), "One of start_states, start_positions should be not None"
         if start_positions is not None:
             start_positions = start_positions[:, None, None].expand(-1, -1, hsz)  # shape (bsz, 1, hsz)
-            sdef forward(self, hidden_states, start_states=None, start_positions=None, p_mask=None):
-    if start_positions is not None:
-        # Prepare start_states from start_positions if possible
-        slen, hsz = hidden_states.shape[-2:]
-        start_positions = start_positions[:, None, None].expand(-1, -1, hsz)
-        start_states = hidden_states.gather(-2, start_positions).expand(-1, slen, -1)
+            start_states = hidden_states.gather(-2, start_positions).squeeze(-2)  # shape (bsz, hsz)
 
-    # Concatenate hidden_states and start_states, feed through dense layers and activation
-    fused_states = torch.cat([hidden_states, start_states], dim=-1) if start_states is not None else hidden_states
-    fused_states = self.dense_activation(self.dense(fused_states))
-    fused_states = self.layer_norm(fused_states)
+        if cls_index is not None:
+            cls_index = cls_index[:, None, None].expand(-1, -1, hsz)  # shape (bsz, 1, hsz)
+            cls_token_state = hidden_states.gather(-2, cls_index).squeeze(-2)  # shape (bsz, hsz)
+        else:
+            cls_token_state = hidden_states[:, -1, :]  # shape (bsz, hsz)
 
-    # Feed through final dense layer and squeeze last dimension
-    logits = self.output(fused_states).squeeze(-1)
+        x = self.dense_0(torch.cat([start_states, cls_token_state], dim=-1))
+        x = self.activation(x)
+        x = self.dense_1(x).squeeze(-1)
 
-    # Apply p_mask if available
-    if p_mask is not None:
-        mask = (1 - p_mask) * -1e30
-        if self.dtype == torch.float16:
-            mask = mask.to(torch.float16)
-        logits += mask
+        return x
 
-    return logitsptional*, returned if `start_positions` or `end_positions` is not provided):
+
+@dataclass
+class SquadHeadOutput(ModelOutput):
+    """
+    Base class for outputs of question answering models using a [`~modeling_utils.SQuADHead`].
+
+    Args:
+        loss (`torch.FloatTensor` of shape `(1,)`, *optional*, returned if both `start_positions` and `end_positions` are provided):
+            Classification loss as the sum of start token, end token (and is_impossible if provided) classification
+            losses.
+        start_top_log_probs (`torch.FloatTensor` of shape `(batch_size, config.start_n_top)`, *optional*, returned if `start_positions` or `end_positions` is not provided):
+            Log probabilities for the top config.start_n_top start token possibilities (beam-search).
+        start_top_index (`torch.LongTensor` of shape `(batch_size, config.start_n_top)`, *optional*, returned if `start_positions` or `end_positions` is not provided):
+            Indices for the top config.start_n_top start token possibilities (beam-search).
+        end_top_log_probs (`torch.FloatTensor` of shape `(batch_size, config.start_n_top * config.end_n_top)`, *optional*, returned if `start_positions` or `end_positions` is not provided):
+            Log probabilities for the top `config.start_n_top * config.end_n_top` end token possibilities
+            (beam-search).
+        end_top_index (`torch.LongTensor` of shape `(batch_size, config.start_n_top * config.end_n_top)`, *optional*, returned if `start_positions` or `end_positions` is not provided):
+            Indices for the top `config.start_n_top * config.end_n_top` end token possibilities (beam-search).
+        cls_logits (`torch.FloatTensor` of shape `(batch_size,)`, *optional*, returned if `start_positions` or `end_positions` is not provided):
             Log probabilities for the `is_impossible` label of the answers.
 
     """
@@ -3204,55 +2704,43 @@ class SQuADHead(nn.Module):
     ) -> Union[SquadHeadOutput, Tuple[torch.FloatTensor]]:
         """
         Args:
-            hidden_states (`torch.FloatTensor` of shape `(batch_size,def forward(
-        self,
-        hidden_states: torch.FloatTensor,
-        start_states: Optional[torch.FloatTensor] = None,
-        start_positions: Optional[torch.LongTensor] = None,
-        cls_index: Optional[torch.LongTensor] = None,
-    ) -> torch.FloatTensor:
-        """
-        Args:
             hidden_states (`torch.FloatTensor` of shape `(batch_size, seq_len, hidden_size)`):
-                The final hidden states of the model.
-            start_states (`torch.FloatTensor` of shape `(batch_size, seq_len, hidden_size)`, *optional*):
-                The hidden states of the first tokens for the labeled span.
+                Final hidden states of the model on the sequence tokens.
             start_positions (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
-                The position of the first token for the labeled span.
+                Positions of the first token for the labeled span.
+            end_positions (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
+                Positions of the last token for the labeled span.
             cls_index (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
                 Position of the CLS token for each sentence in the batch. If `None`, takes the last token.
-
-        <Tip>
-
-        One of `start_states` or `start_positions` should be not `None`. If both are set, `start_positions` overrides
-        `start_states`.
-
-        </Tip>
+            is_impossible (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
+                Whether the question has a possible answer in the paragraph or not.
+            p_mask (`torch.FloatTensor` of shape `(batch_size, seq_len)`, *optional*):
+                Mask for tokens at invalid position, such as query and special symbols (PAD, SEP, CLS). 1.0 means token
+                should be masked.
+            return_dict (`bool`, *optional*, defaults to `False`):
+                Whether or not to return a [`~utils.ModelOutput`] instead of a plain tuple.
 
         Returns:
-            `torch.FloatTensor`: The SQuAD 2.0 answer class.
         """
-        hsz = hidden_states.shape[-1]
-        assert (
-            start_states is not None or start_positions is not None
-        ), "One of start_states, start_positions should be not None"
-        if start_positions is not None:
-            start_states = hidden_states.gather(
-                dim=1, index=start_positions.unsqueeze(-1).repeat(1, 1, hsz)
-            )
+        start_logits = self.start_logits(hidden_states, p_mask=p_mask)
 
-        if cls_index is not None:
-            cls_token_state = hidden_states.gather(
-                dim=1, index=cls_index.unsqueeze(-1).repeat(1, 1, hsz)
-            )
-        else:
-            cls_token_state = hidden_states[:, -1, :]
+        if start_positions is not None and end_positions is not None:
+            # If we are on multi-GPU, let's remove the dimension added by batch splitting
+            for x in (start_positions, end_positions, cls_index, is_impossible):
+                if x is not None and x.dim() > 1:
+                    x.squeeze_(-1)
 
-        start_and_cls = torch.cat([start_states, cls_token_state], dim=-1)
-        x = self.dense_0(start_and_cls)
-        x = self.activation(x)
-        x = self.dense_1(x).squeeze(-1)
-        return xions, cls_index=cls_index)
+            # during training, compute the end logits based on the ground truth of the start position
+            end_logits = self.end_logits(hidden_states, start_positions=start_positions, p_mask=p_mask)
+
+            loss_fct = CrossEntropyLoss()
+            start_loss = loss_fct(start_logits, start_positions)
+            end_loss = loss_fct(end_logits, end_positions)
+            total_loss = (start_loss + end_loss) / 2
+
+            if cls_index is not None and is_impossible is not None:
+                # Predict answerability from the representation of CLS and START
+                cls_logits = self.answer_class(hidden_states, start_positions=start_positions, cls_index=cls_index)
                 loss_fct_cls = nn.BCEWithLogitsLoss()
                 cls_loss = loss_fct_cls(cls_logits, is_impossible)
 
@@ -3310,7 +2798,121 @@ class SequenceSummary(nn.Module):
             The config used by the model. Relevant arguments in the config class of the model are (refer to the actual
             config class of your model for the default values it uses):
 
-            - **summary_type** (`str`) -- The metles(device_map, sharded_metadata):
+            - **summary_type** (`str`) -- The method to use to make this summary. Accepted values are:
+
+                - `"last"` -- Take the last token hidden state (like XLNet)
+                - `"first"` -- Take the first token hidden state (like Bert)
+                - `"mean"` -- Take the mean of all tokens hidden states
+                - `"cls_index"` -- Supply a Tensor of classification token position (GPT/GPT-2)
+                - `"attn"` -- Not implemented now, use multi-head attention
+
+            - **summary_use_proj** (`bool`) -- Add a projection after the vector extraction.
+            - **summary_proj_to_labels** (`bool`) -- If `True`, the projection outputs to `config.num_labels` classes
+              (otherwise to `config.hidden_size`).
+            - **summary_activation** (`Optional[str]`) -- Set to `"tanh"` to add a tanh activation to the output,
+              another string or `None` will add no activation.
+            - **summary_first_dropout** (`float`) -- Optional dropout probability before the projection and activation.
+            - **summary_last_dropout** (`float`)-- Optional dropout probability after the projection and activation.
+    """
+
+    def __init__(self, config: PretrainedConfig):
+        super().__init__()
+
+        self.summary_type = getattr(config, "summary_type", "last")
+        if self.summary_type == "attn":
+            # We should use a standard multi-head attention module with absolute positional embedding for that.
+            # Cf. https://github.com/zihangdai/xlnet/blob/master/modeling.py#L253-L276
+            # We can probably just use the multi-head attention module of PyTorch >=1.1.0
+            raise NotImplementedError
+
+        self.summary = Identity()
+        if hasattr(config, "summary_use_proj") and config.summary_use_proj:
+            if hasattr(config, "summary_proj_to_labels") and config.summary_proj_to_labels and config.num_labels > 0:
+                num_classes = config.num_labels
+            else:
+                num_classes = config.hidden_size
+            self.summary = nn.Linear(config.hidden_size, num_classes)
+
+        activation_string = getattr(config, "summary_activation", None)
+        self.activation: Callable = get_activation(activation_string) if activation_string else Identity()
+
+        self.first_dropout = Identity()
+        if hasattr(config, "summary_first_dropout") and config.summary_first_dropout > 0:
+            self.first_dropout = nn.Dropout(config.summary_first_dropout)
+
+        self.last_dropout = Identity()
+        if hasattr(config, "summary_last_dropout") and config.summary_last_dropout > 0:
+            self.last_dropout = nn.Dropout(config.summary_last_dropout)
+
+    def forward(
+        self, hidden_states: torch.FloatTensor, cls_index: Optional[torch.LongTensor] = None
+    ) -> torch.FloatTensor:
+        """
+        Compute a single vector summary of a sequence hidden states.
+
+        Args:
+            hidden_states (`torch.FloatTensor` of shape `[batch_size, seq_len, hidden_size]`):
+                The hidden states of the last layer.
+            cls_index (`torch.LongTensor` of shape `[batch_size]` or `[batch_size, ...]` where ... are optional leading dimensions of `hidden_states`, *optional*):
+                Used if `summary_type == "cls_index"` and takes the last token of the sequence as classification token.
+
+        Returns:
+            `torch.FloatTensor`: The summary of the sequence hidden states.
+        """
+        if self.summary_type == "last":
+            output = hidden_states[:, -1]
+        elif self.summary_type == "first":
+            output = hidden_states[:, 0]
+        elif self.summary_type == "mean":
+            output = hidden_states.mean(dim=1)
+        elif self.summary_type == "cls_index":
+            if cls_index is None:
+                cls_index = torch.full_like(
+                    hidden_states[..., :1, :],
+                    hidden_states.shape[-2] - 1,
+                    dtype=torch.long,
+                )
+            else:
+                cls_index = cls_index.unsqueeze(-1).unsqueeze(-1)
+                cls_index = cls_index.expand((-1,) * (cls_index.dim() - 1) + (hidden_states.size(-1),))
+            # shape of cls_index: (bsz, XX, 1, hidden_size) where XX are optional leading dim of hidden_states
+            output = hidden_states.gather(-2, cls_index).squeeze(-2)  # shape (bsz, XX, hidden_size)
+        elif self.summary_type == "attn":
+            raise NotImplementedError
+
+        output = self.first_dropout(output)
+        output = self.summary(output)
+        output = self.activation(output)
+        output = self.last_dropout(output)
+
+        return output
+
+
+def unwrap_model(model: nn.Module) -> nn.Module:
+    """
+    Recursively unwraps a model from potential containers (as used in distributed training).
+
+    Args:
+        model (`torch.nn.Module`): The model to unwrap.
+    """
+    # since there could be multiple levels of wrapping, unwrap recursively
+    if hasattr(model, "module"):
+        return unwrap_model(model.module)
+    else:
+        return model
+
+
+def expand_device_map(device_map, param_names):
+    """
+    Expand a device map to return the correspondance parameter name to device.
+    """
+    new_device_map = {}
+    for module, device in device_map.items():
+        new_device_map.update({p: device for p in param_names if p == module or p.startswith(f"{module}.")})
+    return new_device_map
+
+
+def get_disk_only_shard_files(device_map, sharded_metadata):
     """
     Returns the list of shard files containing only weights offloaded to disk.
     """
@@ -3321,30 +2923,3 @@ class SequenceSummary(nn.Module):
         files_content[filename].append(device_map[weight_name])
 
     return [fname for fname, devices in files_content.items() if set(devices) == {"disk"}]
-def forward(self, hidden_states: torch.FloatTensor, cls_index: Optional[torch.LongTensor] = None) -> torch.FloatTensor:
-    """
-    Compute a single vector summary of a sequence hidden states.
-
-    Args:
-        hidden_states (`torch.FloatTensor` of shape `[batch_size, seq_len, hidden_size]`):
-            The hidden states of the last layer.
-        cls_index (`torch.LongTensor` of shape `[batch_size]` or `[batch_size, ...]` where ... are optional leading dimensions of `hidden_states`, *optional*):
-            Used if `summary_type == "cls_index"` and takes the last token of the sequence as classification token.
-
-    Returns:
-        `torch.FloatTensor`: The summary of the sequence hidden states.
-    """
-    if self.summary_type == "attn":
-        raise NotImplementedError
-
-    if self.summary_type == "last":
-        output = hidden_states[:, -1]
-    elif self.summary_type == "first":
-        output = hidden_states[:, 0]
-    elif self.summary_type == "mean":
-        output = hidden_states.mean(dim=1)
-    elif self.summary_type == "cls_index":
-        cls_index = cls_index.unsqueeze(-1) if cls_index is not None else torch.full_like(hidden_states[..., :1, :], hidden_states.shape[-2] - 1, dtype=torch.long)
-        output = hidden_states.gather(-2, cls_index.expand(hidden_states.size()[:-2] + (1, hidden_states.size(-1)))).squeeze(-2)
-
-    return self.last_dropout(self.activation(self.summary(self.first_dropout(output))))
