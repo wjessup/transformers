@@ -1,124 +1,104 @@
-# Define a class named TrialShortNamer
+# Setting up Trial Naming Convention
 class TrialShortNamer:
     
-    # Define class variables
+    # defining prefix, default values and naming_info of experiment/trial
     PREFIX = "hp"
     DEFAULTS = {}
     NAMING_INFO = None
-    
-    # Define a class method to set class variables 
+
+    # Function to set prefix and defaults
     @classmethod
     def set_defaults(cls, prefix, defaults):
         cls.PREFIX = prefix
         cls.DEFAULTS = defaults
         cls.build_naming_info()
 
-    # Define a static method to generate shortname for the given word
+    # Function to shorten a word
     @staticmethod
     def shortname_for_word(info, word):
-        
-        # If length of word is zero return an empty string
-        if len(word) == 0:
+        if not word:
             return ""
-        
-        # Raise exception if word contains any numerical characters
         if any(char.isdigit() for char in word):
-            raise Exception(f"Parameters should not contain numbers: '{word}' contains a number")
-        
-        # If the word is in the list of short words, return the corresponding short word
+            raise ValueError(f"Parameters should not contain numbers: '{word}' contains a number")
+        # Assign a new variable to None
+        short_word = None
+        # If word exists on short_word dict, return its shortened version
         if word in info["short_word"]:
             return info["short_word"][word]
-        
-        # If above conditions fail, generate a new short word for the given word
-        # Iterate from 1 to the length of the word and find the first prefix that is not present in the 
-        # reverse_short_word list (dictionary)
-        # If a prefix is not found, generate a new short word by concatenating the given word with '#' and
-        # integer value of i
-        # Add the generated short word to the short_word and reverse_short_word lists and return it 
-        else:
-            short_word = None
-            for prefix_len in range(1, len(word) + 1):
-                prefix = word[:prefix_len]
-                if prefix in info["reverse_short_word"]:
+        # Shorten word by assigning prefix of the word to a new var until it is not in reverse_short_word dict
+        for prefix_len in range(1, len(word) + 1):
+            prefix = word[:prefix_len]
+            if prefix in info["reverse_short_word"]:
+                continue
+            else:
+                short_word = prefix
+                break
+        # If the word's prefix is already in reverse_short_word then add a combination of the word and a default value
+        if short_word is None:
+            def int_to_alphabetic(integer):
+                s = ""
+                while integer != 0:
+                    s = chr(ord("A") + integer % 10) + s
+                    integer //= 10
+                return s
+            i = 0
+            while True:
+                sword = word + "#" + int_to_alphabetic(i)
+                if sword in info["reverse_short_word"]:
+                    i += 1
                     continue
                 else:
-                    short_word = prefix
+                    short_word = sword
                     break
-            if short_word is None:
-                def int_to_alphabetic(integer):
-                    s = ""
-                    while integer != 0:
-                        s = chr(ord("A") + integer % 10) + s
-                        integer //= 10
-                    return s
-            
-                i = 0
-                while True:
-                    sword = word + "#" + int_to_alphabetic(i)
-                    if sword in info["reverse_short_word"]:
-                        continue
-                    else:
-                        short_word = sword
-                        break
-            info["short_word"][word] = short_word
-            info["reverse_short_word"][short_word] = word
-            return short_word
-    
-    # Define a static method to generate shortname for the given parameter name
+        # Update info dicts with new values
+        info["short_word"][word] = short_word
+        info["reverse_short_word"][short_word] = word
+        # Return shortened version of the word
+        return short_word
+
+    # Use shortname_for_words() to shorten parameter names and add to naming_info dict
     @staticmethod
     def shortname_for_key(info, param_name):
-        # Split the parameter name using '_' separator
+        # Use '_' to split parameter names into words
         words = param_name.split("_")
-        
-        # Generate shortnames for each word in the parameter name
+        # Shorten individual words and add them back to a shortened parameter name
         shortname_parts = [TrialShortNamer.shortname_for_word(info, word) for word in words]
-
-        # We try to create a separatorless short name, but if there is a collision we have to fallback
-        # to a separated short name
-        # Generate a short name by concatenating the short name parts using '' and '_' separators
-        # Check if the generated short name already exists in the reverse_short_param list (dictionary).
-        # If it does not exist, add the short name and parameter name to the respective lists and return the 
-        # generated short name
-        # else return the parameter name
-        
         separators = ["", "_"]
+        # Shortened name is either separator-less or uses '_' as a separator
         for separator in separators:
             shortname = separator.join(shortname_parts)
+            # If name is not in reverse_short_param dict we add it
             if shortname not in info["reverse_short_param"]:
                 info["short_param"][param_name] = shortname
                 info["reverse_short_param"][shortname] = param_name
                 return shortname
-            
         return param_name
-    
-    # Define a static method to add new parameter name to short_param and reverse_short_param list
+
+    #Add a new parameter to naming_info dict
     @staticmethod
     def add_new_param_name(info, param_name):
         short_name = TrialShortNamer.shortname_for_key(info, param_name)
         info["short_param"][param_name] = short_name
         info["reverse_short_param"][short_name] = param_name
 
-    # Define a class method to generate short names for all parameter names in the DEFAULTS list
+    # Create naming_info dict using defaults
     @classmethod
     def build_naming_info(cls):
         if cls.NAMING_INFO is not None:
             return
-
         info = {
             "short_word": {},
             "reverse_short_word": {},
             "short_param": {},
             "reverse_short_param": {},
         }
-
         field_keys = list(cls.DEFAULTS.keys())
-
         for k in field_keys:
             cls.add_new_param_name(info, k)
-
         cls.NAMING_INFO = info
-    
-    # Define a class method to generate the final short name of the trial
+
+    # Function to create a short name for trial/experiment by appending the parameters and values
+    # from the experiment to a prefix with an underscore in between
     @classmethod
     def shortname(cls, params):
         cls.build_naming_info()
@@ -127,7 +107,7 @@ class TrialShortNamer:
 
         for k, v in params.items():
             if k not in cls.DEFAULTS:
-                raise Exception(f"You should provide a default value for the param name {k} with value {v}")
+                raise ValueError(f"You should provide a default value for the param name {k} with value {v}")
             if v == cls.DEFAULTS[k]:
                 # The default value is not added to the name
                 continue
@@ -143,31 +123,26 @@ class TrialShortNamer:
 
         return "_".join(name)
 
-    # Define a class method to parse the trial short name and return the parameter dict
+    #Function parse short name into parameters and values
     @classmethod
     def parse_repr(cls, repr):
-        # Remove the prefix from the short name and extract the parameter values from the short name
         repr = repr[len(cls.PREFIX) + 1 :]
-        if repr == "":
-            values = []
-        else:
-            values = repr.split("_")
-        
-        # Create a dictionary containing the parameter name and its corresponding value
+        values = repr.split("_") if repr else []
         parameters = {}
         for value in values:
+            # If value is separated by '-' in shortened name, it means the value is numeric (int/float)
             if "-" in value:
                 p_k, p_v = value.split("-")
             else:
+                # Get parameter_name by removing numbers and periods from string
                 p_k = re.sub("[0-9.]", "", value)
+                # Get parameter_value by keeping only the numbers and periods
                 p_v = float(re.sub("[^0-9.]", "", value))
 
-            # Update the parameter value in the dictionary
             key = cls.NAMING_INFO["reverse_short_param"][p_k]
 
             parameters[key] = p_v
-        
-        # Update parameters dictionary with default parameters
+
         for k in cls.DEFAULTS:
             if k not in parameters:
                 parameters[k] = cls.DEFAULTS[k]
