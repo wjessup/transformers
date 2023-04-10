@@ -264,7 +264,7 @@ def shard_checkpoint(
         # If this weight is going to tip up over the maximal size, we split.
         if current_block_size + weight_size > max_shard_size:
             sharded_state_dicts.append(current_block)
-            currenate_dict for {model.__class__.__name__}"
+
         if len(missing_keys) > 0:
             str_missing_keys = ",".join([f'"{k}"' for k in missing_keys])
             error_message += f"\nMissing key(s): {str_missing_keys}."
@@ -273,11 +273,13 @@ def shard_checkpoint(
             error_message += f"\nMissing key(s): {str_unexpected_keys}."
         raise RuntimeError(error_message)
 
+    loader = safe_load_file if load_safe else partial(torch.load, map_location="cpu")
+
     for shard_file in shard_files:
-        state_dict = torch.load(os.path.join(folder, shard_file), map_location="cpu")
+        state_dict = loader(os.path.join(folder, shard_file))
         model.load_state_dict(state_dict, strict=False)
 
-        # Make sure memory is fred before we load the next state dict.
+        # Make sure memory is freed before we load the next state dict.
         del state_dict
         gc.collect()
 
@@ -569,11 +571,29 @@ def _load_state_dict_into_meta_model(
 
 
 class BackboneMixin:
+    @property
+    def out_feature_channels(self):
+        # the current backbones will output the number of channels for each stage
+        # even if that stage is not in the out_features list.
+        return {stage: self.num_features[i] for i, stage in enumerate(self.stage_names)}
+
+    @property
+    def channels(self):
+        return [self.out_feature_channels[name] for name in self.out_features]
+
     def forward_with_filtered_kwargs(self, *args, **kwargs):
         signature = dict(inspect.signature(self.forward).parameters)
         filtered_kwargs = {k: v for k, v in kwargs.items() if k in signature}
-
         return self(*args, **filtered_kwargs)
+
+    def forward(
+        self,
+        pixel_values: Tensor,
+        output_hidden_states: Optional[bool] = None,
+        output_attentions: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+    ):
+        raise NotImplementedError("This method should be implemented by the derived class.")
 
 
 class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMixin):
@@ -741,7 +761,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
             `bool`: Whether this model can generate sequences with `.generate()`.
         """
         # Detects whether `prepare_inputs_for_generation` has been overwritten, which is a requirement for generation
-        if "GenerationMixin" in str(self.prepare_inputs_for_generation):
+        if "GenerationMixin" in str(self.prepare_inputs_for_generation.__func__):
             return False
         return True
 
@@ -1175,7 +1195,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
             )
             is_main_process = kwargs.pop("save_config")
         if safe_serialization and not is_safetensors_available():
-            raise ImportError("`safe_serialization` requires the `safetensors library: `pip install safetenso_file), metadata={"format": "pt"})
+
             else:
                 save_function(shard, os.path.join(save_directory, shard_file))
 
@@ -1858,7 +1878,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 if len(keys_on_cpu) > 0 and not load_in_8bit_fp32_cpu_offload:
                     raise ValueError(
                         "If you want to offload some keys to `cpu` or `disk`, you need to set "
-                        "`load_in_8bit_fp32_cpu_offload=True`. Note that these modules will not be "
+                        "`llm_int8_enable_fp32_cpu_offload=True`. Note that these modules will not be "
                         " converted to 8-bit but kept in 32-bit."
                     )
 
@@ -2114,6 +2134,11 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         missing_keys = list(set(expected_keys) - set(loaded_keys))
         unexpected_keys = list(set(loaded_keys) - set(expected_keys))
 
+        # Some tensors maybe have been already filled by another key (tied weights).
+        existing_ptrs = {model_state_dict[k].data_ptr() for k in loaded_keys if k in model_state_dict}
+        missing_keys = [
+            k for k in missing_keys if k in model_state_dict and model_state_dict[k].data_ptr() not in existing_ptrs
+        ]
         # Some models may have keys that are not in the state by design, removing them before needlessly warning
         # the user.
         if cls._keys_to_ignore_on_load_missing is not None:

@@ -96,7 +96,7 @@ _import_structure = {
     "feature_extraction_sequence_utils": ["SequenceFeatureExtractor"],
     "feature_extraction_utils": ["BatchFeature", "FeatureExtractionMixin"],
     "file_utils": [],
-    "generation": ["GenerationConfig"],
+    "generation": ["GenerationConfig", "TextIteratorStreamer", "TextStreamer"],
     "hf_argparser": ["HfArgumentParser"],
     "image_transforms": [],
     "integrations": [
@@ -298,6 +298,7 @@ _import_structure = {
     "models.git": ["GIT_PRETRAINED_CONFIG_ARCHIVE_MAP", "GitConfig", "GitProcessor", "GitVisionConfig"],
     "models.glpn": ["GLPN_PRETRAINED_CONFIG_ARCHIVE_MAP", "GLPNConfig"],
     "models.gpt2": ["GPT2_PRETRAINED_CONFIG_ARCHIVE_MAP", "GPT2Config", "GPT2Tokenizer"],
+    "models.gpt_bigcode": ["GPT_BIGCODE_PRETRAINED_CONFIG_ARCHIVE_MAP", "GPTBigCodeConfig"],
     "models.gpt_neo": ["GPT_NEO_PRETRAINED_CONFIG_ARCHIVE_MAP", "GPTNeoConfig"],
     "models.gpt_neox": ["GPT_NEOX_PRETRAINED_CONFIG_ARCHIVE_MAP", "GPTNeoXConfig"],
     "models.gpt_neox_japanese": ["GPT_NEOX_JAPANESE_PRETRAINED_CONFIG_ARCHIVE_MAP", "GPTNeoXJapaneseConfig"],
@@ -740,6 +741,7 @@ else:
     _import_structure["models.layoutlmv3"].append("LayoutLMv3TokenizerFast")
     _import_structure["models.layoutxlm"].append("LayoutXLMTokenizerFast")
     _import_structure["models.led"].append("LEDTokenizerFast")
+    _import_structure["models.llama"].append("LlamaTokenizerFast")
     _import_structure["models.longformer"].append("LongformerTokenizerFast")
     _import_structure["models.lxmert"].append("LxmertTokenizerFast")
     _import_structure["models.markuplm"].append("MarkupLMTokenizerFast")
@@ -1131,6 +1133,7 @@ else:
         [
             "BIOGPT_PRETRAINED_MODEL_ARCHIVE_LIST",
             "BioGptForCausalLM",
+            "BioGptForTokenClassification",
             "BioGptModel",
             "BioGptPreTrainedModel",
         ]
@@ -1637,6 +1640,16 @@ else:
             "GPT2Model",
             "GPT2PreTrainedModel",
             "load_tf_weights_in_gpt2",
+        ]
+    )
+    _import_structure["models.gpt_bigcode"].extend(
+        [
+            "GPT_BIGCODE_PRETRAINED_MODEL_ARCHIVE_LIST",
+            "GPTBigCodeForCausalLM",
+            "GPTBigCodeForSequenceClassification",
+            "GPTBigCodeForTokenClassification",
+            "GPTBigCodeModel",
+            "GPTBigCodePreTrainedModel",
         ]
     )
     _import_structure["models.gpt_neo"].extend(
@@ -2902,6 +2915,18 @@ else:
     _import_structure["models.blenderbot_small"].extend(
         ["TFBlenderbotSmallForConditionalGeneration", "TFBlenderbotSmallModel", "TFBlenderbotSmallPreTrainedModel"]
     )
+    _import_structure["models.blip"].extend(
+        [
+            "TF_BLIP_PRETRAINED_MODEL_ARCHIVE_LIST",
+            "TFBlipForConditionalGeneration",
+            "TFBlipForImageTextRetrieval",
+            "TFBlipForQuestionAnswering",
+            "TFBlipModel",
+            "TFBlipPreTrainedModel",
+            "TFBlipTextModel",
+            "TFBlipVisionModel",
+        ]
+    )
     _import_structure["models.camembert"].extend(
         [
             "TF_CAMEMBERT_PRETRAINED_MODEL_ARCHIVE_LIST",
@@ -3648,6 +3673,9 @@ else:
             "FlaxPegasusPreTrainedModel",
         ]
     )
+    _import_structure["models.regnet"].extend(
+        ["FlaxRegNetForImageClassification", "FlaxRegNetModel", "FlaxRegNetPreTrainedModel"]
+    )
     _import_structure["models.resnet"].extend(
         ["FlaxResNetForImageClassification", "FlaxResNetModel", "FlaxResNetPreTrainedModel"]
     )
@@ -3769,7 +3797,7 @@ if TYPE_CHECKING:
     from .feature_extraction_utils import BatchFeature, FeatureExtractionMixin
 
     # Generation
-    from .generation import GenerationConfig
+    from .generation import GenerationConfig, TextIteratorStreamer, TextStreamer
     from .hf_argparser import HfArgumentParser
 
     # Integrations
@@ -3965,6 +3993,7 @@ if TYPE_CHECKING:
     from .models.git import GIT_PRETRAINED_CONFIG_ARCHIVE_MAP, GitConfig, GitProcessor, GitVisionConfig
     from .models.glpn import GLPN_PRETRAINED_CONFIG_ARCHIVE_MAP, GLPNConfig
     from .models.gpt2 import GPT2_PRETRAINED_CONFIG_ARCHIVE_MAP, GPT2Config, GPT2Tokenizer
+    from .models.gpt_bigcode import GPT_BIGCODE_PRETRAINED_CONFIG_ARCHIVE_MAP, GPTBigCodeConfig
     from .models.gpt_neo import GPT_NEO_PRETRAINED_CONFIG_ARCHIVE_MAP, GPTNeoConfig
     from .models.gpt_neox import GPT_NEOX_PRETRAINED_CONFIG_ARCHIVE_MAP, GPTNeoXConfig
     from .models.gpt_neox_japanese import GPT_NEOX_JAPANESE_PRETRAINED_CONFIG_ARCHIVE_MAP, GPTNeoXJapaneseConfig
@@ -4372,6 +4401,7 @@ if TYPE_CHECKING:
         from .models.layoutlmv3 import LayoutLMv3TokenizerFast
         from .models.layoutxlm import LayoutXLMTokenizerFast
         from .models.led import LEDTokenizerFast
+        from .models.llama import LlamaTokenizerFast
         from .models.longformer import LongformerTokenizerFast
         from .models.lxmert import LxmertTokenizerFast
         from .models.markuplm import MarkupLMTokenizerFast
@@ -4703,6 +4733,7 @@ if TYPE_CHECKING:
         from .models.biogpt import (
             BIOGPT_PRETRAINED_MODEL_ARCHIVE_LIST,
             BioGptForCausalLM,
+            BioGptForTokenClassification,
             BioGptModel,
             BioGptPreTrainedModel,
         )
@@ -5113,6 +5144,14 @@ if TYPE_CHECKING:
             GPT2Model,
             GPT2PreTrainedModel,
             load_tf_weights_in_gpt2,
+        )
+        from .models.gpt_bigcode import (
+            GPT_BIGCODE_PRETRAINED_MODEL_ARCHIVE_LIST,
+            GPTBigCodeForCausalLM,
+            GPTBigCodeForSequenceClassification,
+            GPTBigCodeForTokenClassification,
+            GPTBigCodeModel,
+            GPTBigCodePreTrainedModel,
         )
         from .models.gpt_neo import (
             GPT_NEO_PRETRAINED_MODEL_ARCHIVE_LIST,
@@ -6143,6 +6182,16 @@ if TYPE_CHECKING:
             TFBlenderbotSmallModel,
             TFBlenderbotSmallPreTrainedModel,
         )
+        from .models.blip import (
+            TF_BLIP_PRETRAINED_MODEL_ARCHIVE_LIST,
+            TFBlipForConditionalGeneration,
+            TFBlipForImageTextRetrieval,
+            TFBlipForQuestionAnswering,
+            TFBlipModel,
+            TFBlipPreTrainedModel,
+            TFBlipTextModel,
+            TFBlipVisionModel,
+        )
         from .models.camembert import (
             TF_CAMEMBERT_PRETRAINED_MODEL_ARCHIVE_LIST,
             TFCamembertForCausalLM,
@@ -6715,6 +6764,7 @@ if TYPE_CHECKING:
         from .models.mt5 import FlaxMT5EncoderModel, FlaxMT5ForConditionalGeneration, FlaxMT5Model
         from .models.opt import FlaxOPTForCausalLM, FlaxOPTModel, FlaxOPTPreTrainedModel
         from .models.pegasus import FlaxPegasusForConditionalGeneration, FlaxPegasusModel, FlaxPegasusPreTrainedModel
+        from .models.regnet import FlaxRegNetForImageClassification, FlaxRegNetModel, FlaxRegNetPreTrainedModel
         from .models.resnet import FlaxResNetForImageClassification, FlaxResNetModel, FlaxResNetPreTrainedModel
         from .models.roberta import (
             FlaxRobertaForCausalLM,

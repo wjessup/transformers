@@ -1093,6 +1093,13 @@ class BioGptForCausalLM(metaclass=DummyObject):
         requires_backends(self, ["torch"])
 
 
+class BioGptForTokenClassification(metaclass=DummyObject):
+    _backends = ["torch"]
+
+    def __init__(self, *args, **kwargs):
+        requires_backends(self, ["torch"])
+
+
 class BioGptModel(metaclass=DummyObject):
     _backends = ["torch"]
 
@@ -3144,6 +3151,44 @@ class GPT2PreTrainedModel(metaclass=DummyObject):
 
 def load_tf_weights_in_gpt2(*args, **kwargs):
     requires_backends(load_tf_weights_in_gpt2, ["torch"])
+
+
+GPT_BIGCODE_PRETRAINED_MODEL_ARCHIVE_LIST = None
+
+
+class GPTBigCodeForCausalLM(metaclass=DummyObject):
+    _backends = ["torch"]
+
+    def __init__(self, *args, **kwargs):
+        requires_backends(self, ["torch"])
+
+
+class GPTBigCodeForSequenceClassification(metaclass=DummyObject):
+    _backends = ["torch"]
+
+    def __init__(self, *args, **kwargs):
+        requires_backends(self, ["torch"])
+
+
+class GPTBigCodeForTokenClassification(metaclass=DummyObject):
+    _backends = ["torch"]
+
+    def __init__(self, *args, **kwargs):
+        requires_backends(self, ["torch"])
+
+
+class GPTBigCodeModel(metaclass=DummyObject):
+    _backends = ["torch"]
+
+    def __init__(self, *args, **kwargs):
+        requires_backends(self, ["torch"])
+
+
+class GPTBigCodePreTrainedModel(metaclass=DummyObject):
+    _backends = ["torch"]
+
+    def __init__(self, *args, **kwargs):
+        requires_backends(self, ["torch"])
 
 
 GPT_NEO_PRETRAINED_MODEL_ARCHIVE_LIST = None
