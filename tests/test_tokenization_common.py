@@ -1014,41 +1014,104 @@ class TokenizerTesterMixin:
                         tokenizer.num_special_tokens_to_add(pair=True), len(attached_sequences) - len(sequences)
                     )
 
-    def load_checkpoint(model, folder):
-    """
-    Loads a PyTorch model from a sharded checkpoint.
+    def test_maximum_encoding_length_single_input(self):
+        tokenizers = self.get_tokenizers(do_lower_case=False, model_max_length=100)
+        for tokenizer in tokenizers:
+            with self.subTest(f"{tokenizer.__class__.__name__}"):
+                seq_0, ids = self.get_clean_sequence(tokenizer, max_length=20)
 
-    Args:
-        model (torch.nn.Module): The model to which the checkpoint will be loaded.
-        folder (str): The path to the folder containing checkpoint data.
+                sequence = tokenizer.encode(seq_0, add_special_tokens=False)
+                total_length = len(sequence)
 
-    Returns:
-        A named tuple with missing_keys and unexpected_keys fields
-        - missing_keys is a list of str containing the missing keys
-        - unexpected_keys is a list of str containing the unexpected keys
-    """
-    index_file = os.path.join(folder, WEIGHTS_INDEX_NAME)
-    try:
-        with open(index_file, "r", encoding="utf-8") as f:
-            index = torch.load(f)
-    except FileNotFoundError as e:
-        raise OSError(f"Could not find checkpoint index file ({WEIGHTS_INDEX_NAME}) in {folder}: {e}")
+                self.assertGreater(
+                    total_length, 4, "Issue with the testing sequence, please update it, it's too short"
+                )
 
-    shard_files = set(index["weight_map"].values())
-    loaded_keys = index["weight_map"].keys()
+                # Test with max model input length
+                model_max_length = tokenizer.model_max_length
+                self.assertEqual(model_max_length, 100)
+                seq_1 = seq_0 * model_max_length
 
-    model_keys = model.state_dict().keys()
-    missing_keys = [k for k in model_keys if k not in loaded_keys]
-    unexpected_keys = [k for k in loaded_keys if k not in model_keys]
+                sequence1 = tokenizer(seq_1, add_special_tokens=False)
+                total_length1 = len(sequence1["input_ids"])
+                self.assertGreater(
+                    total_length1,
+                    model_max_length,
+                    "Issue with the testing sequence, please update it, it's too short",
+                )
 
-    for shard_file in shard_files:
-        state_dict = torch.load(os.path.join(folder, shard_file))
-        model.load_state_dict(state_dict, strict=False)
+                # Simple
+                padding_strategies = (
+                    [False, True, "longest"] if tokenizer.pad_token and tokenizer.pad_token_id >= 0 else [False]
+                )
+                for padding_state in padding_strategies:
+                    with self.subTest(f"Padding: {padding_state}"):
+                        for truncation_state in [True, "longest_first", "only_first"]:
+                            with self.subTest(f"Truncation: {truncation_state}"):
+                                output = tokenizer(seq_1, padding=padding_state, truncation=truncation_state)
+                                self.assertEqual(len(output["input_ids"]), model_max_length)
 
-        del state_dict
-        gc.collect()
+                                output = tokenizer([seq_1], padding=padding_state, truncation=truncation_state)
+                                self.assertEqual(len(output["input_ids"][0]), model_max_length)
 
-    return torch.nn.modules.module._IncompatibleKeys(missing_keys, unexpected_keys)
+                        # Simple with no truncation
+                        # Reset warnings
+                        tokenizer.deprecation_warnings = {}
+                        with self.assertLogs("transformers", level="WARNING") as cm:
+                            output = tokenizer(seq_1, padding=padding_state, truncation=False)
+                            self.assertNotEqual(len(output["input_ids"]), model_max_length)
+                        self.assertEqual(len(cm.records), 1)
+                        self.assertTrue(
+                            cm.records[0].message.startswith(
+                                "Token indices sequence length is longer than the specified maximum sequence length"
+                                " for this model"
+                            )
+                        )
+
+                        tokenizer.deprecation_warnings = {}
+                        with self.assertLogs("transformers", level="WARNING") as cm:
+                            output = tokenizer([seq_1], padding=padding_state, truncation=False)
+                            self.assertNotEqual(len(output["input_ids"][0]), model_max_length)
+                        self.assertEqual(len(cm.records), 1)
+                        self.assertTrue(
+                            cm.records[0].message.startswith(
+                                "Token indices sequence length is longer than the specified maximum sequence length"
+                                " for this model"
+                            )
+                        )
+
+                # Overflowing tokens
+                stride = 2
+                information = tokenizer(
+                    seq_0,
+                    max_length=total_length - 2,
+                    add_special_tokens=False,
+                    stride=stride,
+                    truncation="longest_first",
+                    return_overflowing_tokens=True,
+                    # add_prefix_space=False,
+                )
+
+                # Overflowing tokens are handled quite differently in slow and fast tokenizers
+                if isinstance(tokenizer, PreTrainedTokenizerFast):
+                    truncated_sequence = information["input_ids"][0]
+                    overflowing_tokens = information["input_ids"][1]
+                    self.assertEqual(len(information["input_ids"]), 2)
+
+                    self.assertEqual(len(truncated_sequence), total_length - 2)
+                    self.assertEqual(truncated_sequence, sequence[:-2])
+
+                    self.assertEqual(len(overflowing_tokens), 2 + stride)
+                    self.assertEqual(overflowing_tokens, sequence[-(2 + stride) :])
+                else:
+                    truncated_sequence = information["input_ids"]
+                    overflowing_tokens = information["overflowing_tokens"]
+
+                    self.assertEqual(len(truncated_sequence), total_length - 2)
+                    self.assertEqual(truncated_sequence, sequence[:-2])
+
+                    self.assertEqual(len(overflowing_tokens), 2 + stride)
+                    self.assertEqual(overflowing_tokens, sequence[-(2 + stride) :])
 
     def test_maximum_encoding_length_pair_input(self):
         tokenizers = self.get_tokenizers(do_lower_case=False, model_max_length=100)
@@ -3631,104 +3694,42 @@ class TokenizerTesterMixin:
 
         self.assertDictEqual(tokenizer.special_tokens_map, new_tokenizer.special_tokens_map)
 
-    def test_training_new_tokenizer_with_special_tokens_change(self):
-        # This feature only exists for fast tokenizers
-        if not self.test_rust_tokenizer:
-            return
+    def test_training_new_tokenizdef load_checkpoint(model, folder):
+    """
+    Loads a PyTorch model from a sharded checkpoint.
 
-        tokenizer = self.get_rust_tokenizer()
-        # Test with a special tokens map
-        class_signature = inspect.signature(tokenizer.__class__)
-        if "cls_token" in class_signature.parameters:
-            new_tokenizer = tokenizer.train_new_from_iterator(
-                SMALL_TRAINING_CORPUS, 100, special_tokens_map={tokenizer.cls_token: "<cls>"}
-            )
-            cls_id = new_tokenizer.get_vocab()["<cls>"]
-            self.assertEqual(new_tokenizer.cls_token, "<cls>")
-            self.assertEqual(new_tokenizer.cls_token_id, cls_id)
+    Args:
+        model (torch.nn.Module): The model to which the checkpoint will be loaded.
+        folder (str): The path to the folder containing checkpoint data.
 
-        # Create a new mapping from the special tokens defined in the original tokenizer
-        special_tokens_list = SpecialTokensMixin.SPECIAL_TOKENS_ATTRIBUTES.copy()
-        special_tokens_list.remove("additional_special_tokens")
-        special_tokens_map = {}
-        for token in special_tokens_list:
-            # Get the private one to avoid unnecessary warnings.
-            if getattr(tokenizer, f"_{token}") is not None:
-                special_token = getattr(tokenizer, token)
-                special_tokens_map[special_token] = f"{special_token}a"
+    Returns:
+        A named tuple with missing_keys and unexpected_keys fields
+        - missing_keys is a list of str containing the missing keys
+        - unexpected_keys is a list of str containing the unexpected keys
+    """
+    index_file = os.path.join(folder, WEIGHTS_INDEX_NAME)
+    try:
+        with open(index_file, "r", encoding="utf-8") as f:
+            index = torch.load(f)
+    except FileNotFoundError as e:
+        raise OSError(f"Could not find checkpoint index file ({WEIGHTS_INDEX_NAME}) in {folder}: {e}")
 
-        # Train new tokenizer
-        new_tokenizer = tokenizer.train_new_from_iterator(
-            SMALL_TRAINING_CORPUS, 100, special_tokens_map=special_tokens_map
-        )
+    shard_files = set(index["weight_map"].values())
+    loaded_keys = index["weight_map"].keys()
 
-        # Check the changes
-        for token in special_tokens_list:
-            # Get the private one to avoid unnecessary warnings.
-            if getattr(tokenizer, f"_{token}") is None:
-                continue
-            special_token = getattr(tokenizer, token)
-            if special_token in special_tokens_map:
-                new_special_token = getattr(new_tokenizer, token)
-                self.assertEqual(special_tokens_map[special_token], new_special_token)
+    model_keys = model.state_dict().keys()
+    missing_keys = [k for k in model_keys if k not in loaded_keys]
+    unexpected_keys = [k for k in loaded_keys if k not in model_keys]
 
-                new_id = new_tokenizer.get_vocab()[new_special_token]
-                self.assertEqual(getattr(new_tokenizer, f"{token}_id"), new_id)
+    for shard_file in shard_files:
+        state_dict = torch.load(os.path.join(folder, shard_file))
+        model.load_state_dict(state_dict, strict=False)
 
-        # Check if the AddedToken / string format has been kept
-        for special_token in tokenizer.all_special_tokens_extended:
-            if isinstance(special_token, AddedToken) and special_token.content not in special_tokens_map:
-                # The special token must appear identically in the list of the new tokenizer.
-                self.assertTrue(
-                    special_token in new_tokenizer.all_special_tokens_extended,
-                    f"'{special_token}' should be in {new_tokenizer.all_special_tokens_extended}",
-                )
-            elif isinstance(special_token, AddedToken):
-                # The special token must appear in the list of the new tokenizer as an object of type AddedToken with
-                # the same parameters as the old AddedToken except the content that the user has requested to change.
-                special_token_str = special_token.content
-                new_special_token_str = special_tokens_map[special_token_str]
+        del state_dict
+        gc.collect()
 
-                find = False
-                for candidate in new_tokenizer.all_special_tokens_extended:
-                    if (
-                        isinstance(candidate, AddedToken)
-                        and candidate.content == new_special_token_str
-                        and candidate.lstrip == special_token.lstrip
-                        and candidate.rstrip == special_token.rstrip
-                        and candidate.normalized == special_token.normalized
-                        and candidate.single_word == special_token.single_word
-                    ):
-                        find = True
-                        break
-                self.assertTrue(
-                    find,
-                    f"'{new_special_token_str}' doesn't appear in the list "
-                    f"'{new_tokenizer.all_special_tokens_extended}' as an AddedToken with the same parameters as "
-                    f"'{special_token}' in the list {tokenizer.all_special_tokens_extended}",
-                )
-            elif special_token not in special_tokens_map:
-                # The special token must appear identically in the list of the new tokenizer.
-                self.assertTrue(
-                    special_token in new_tokenizer.all_special_tokens_extended,
-                    f"'{special_token}' should be in {new_tokenizer.all_special_tokens_extended}",
-                )
-
-            else:
-                # The special token must appear in the list of the new tokenizer as an object of type string.
-                self.assertTrue(special_tokens_map[special_token] in new_tokenizer.all_special_tokens_extended)
-
-        # Test we can use the new tokenizer with something not seen during training
-        inputs = new_tokenizer(["This is the first sentence", "This sentence is different 🤗."])
-        self.assertEqual(len(inputs["input_ids"]), 2)
-        decoded_input = new_tokenizer.decode(inputs["input_ids"][0], skip_special_tokens=True)
-        expected_result = "This is the first sentence"
-
-        if tokenizer.backend_tokenizer.normalizer is not None:
-            expected_result = tokenizer.backend_tokenizer.normalizer.normalize_str(expected_result)
-        self.assertEqual(expected_result, decoded_input)
-
-    def test_tokenizer_mismatch_warning(self):
+    return torch.nn.modules.module._IncompatibleKeys(missing_keys, unexpected_keys)
+_warning(self):
         for tokenizer, pretrained_name, kwargs in self.tokenizers_list:
             with self.subTest(f"{tokenizer.__class__.__name__} ({pretrained_name})"):
                 with self.assertLogs("transformers", level="WARNING") as cm:
