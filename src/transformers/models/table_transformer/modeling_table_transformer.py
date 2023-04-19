@@ -660,85 +660,51 @@ class TableTransformerDecoderLayer(nn.Module):
         self.fc2 = nn.Linear(config.decoder_ffn_dim, self.embed_dim)
         self.final_layer_norm = nn.LayerNorm(self.embed_dim)
 
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_embeddings: Optional[torch.Tensor] = None,
-        query_position_embeddings: Optional[torch.Tensor] = None,
-        encoder_hidden_states: Optional[torch.Tensor] = None,
-        encoder_attention_mask: Optional[torch.Tensor] = None,
-        output_attentions: Optional[bool] = False,
-    ):
-        """
-        Args:
-            hidden_states (`torch.FloatTensor`): input to the layer of shape `(seq_len, batch, embed_dim)`
-            attention_mask (`torch.FloatTensor`): attention mask of size
-                `(batch, 1, target_len, source_len)` where padding elements are indicated by very large negative
-                values.
-            position_embeddings (`torch.FloatTensor`, *optional*):
-                position embeddings that are added to the queries and keys
-            in the cross-attention layer.
-            query_position_embeddings (`torch.FloatTensor`, *optional*):
-                position embeddings that are added to the queries and keys
-            in the self-attention layer.
-            encoder_hidden_states (`torch.FloatTensor`):
-                cross attention input to the layer of shape `(seq_len, batch, embed_dim)`
-            encoder_attention_mask (`torch.FloatTensor`): encoder attention mask of size
-                `(batch, 1, target_len, source_len)` where padding elements are indicated by very large negative
-                values.
-            output_attentions (`bool`, *optional*):
-                Whether or not to return the attentions tensors of all attention layers. See `attentions` under
-                returned tensors for more detail.
-        """
-        residual = hidden_states
-        hidden_states = self.self_attn_layer_norm(hidden_states)
+    from typing import Dict, Union, Optional
 
-        # Self Attention
-        hidden_states, self_attn_weights = self.self_attn(
-            hidden_states=hidden_states,
-            position_embeddings=query_position_embeddings,
-            attention_mask=attention_mask,
-            output_attentions=output_attentions,
-        )
+def forward(self, hidden_states: torch.Tensor, attention_mask: Optional[torch.Tensor] = None, 
+            position_embeddings: Optional[torch.Tensor] = None,
+            query_position_embeddings: Optional[torch.Tensor] = None,
+            encoder_hidden_states: Optional[torch.Tensor] = None,
+            encoder_attention_mask: Optional[torch.Tensor] = None,
+            output_attentions: Optional[bool] = False) -> Dict[str, Union[torch.Tensor, Dict[str, torch.Tensor]]]:
 
-        hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
+    residual = hidden_states
+    hidden_states = self.layer_norm_self_attn(hidden_states)
+
+    hidden_states, self_attn_weights = self.multi_head_attention(query=hidden_states,
+                                                                 key_value=hidden_states,
+                                                                 position_embeddings=query_position_embeddings,
+                                                                 attention_mask=attention_mask,
+                                                                 output_attentions=output_attentions)
+
+    hidden_states = nn.Dropout(p=self.dropout)(hidden_states)
+    hidden_states = residual + hidden_states
+
+    residual = hidden_states
+    hidden_states = self.layer_norm_cross_attn(hidden_states)
+
+    cross_attn_weights = None
+    if encoder_hidden_states is not None:
+        hidden_states, cross_attn_weights = self.multi_head_attention(query=hidden_states,
+                                                                      key_value=encoder_hidden_states,
+                                                                      position_embeddings=position_embeddings,
+                                                                      attention_mask=encoder_attention_mask,
+                                                                      output_attentions=output_attentions)
+
+        hidden_states = nn.Dropout(p=self.dropout)(hidden_states)
         hidden_states = residual + hidden_states
+        hidden_states = self.layer_norm_output(hidden_states)
 
-        residual = hidden_states
-        hidden_states = self.encoder_attn_layer_norm(hidden_states)
+    hidden_states = self.feed_forward(hidden_states)
+    hidden_states = nn.Dropout(p=self.dropout)(hidden_states)
+    hidden_states = residual + hidden_states
 
-        # Cross-Attention Block
-        cross_attn_weights = None
-        if encoder_hidden_states is not None:
-            hidden_states, cross_attn_weights = self.encoder_attn(
-                hidden_states=hidden_states,
-                position_embeddings=query_position_embeddings,
-                key_value_states=encoder_hidden_states,
-                attention_mask=encoder_attention_mask,
-                key_value_position_embeddings=position_embeddings,
-                output_attentions=output_attentions,
-            )
+    outputs = {'last_hidden_state': hidden_states}
+    if output_attentions:
+        outputs.update({'self_attentions': self_attn_weights, 'cross_attentions': cross_attn_weights})
 
-            hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
-            hidden_states = residual + hidden_states
-
-            residual = hidden_states
-            hidden_states = self.final_layer_norm(hidden_states)
-
-        # Fully Connected
-        hidden_states = self.activation_fn(self.fc1(hidden_states))
-        hidden_states = nn.functional.dropout(hidden_states, p=self.activation_dropout, training=self.training)
-        hidden_states = self.fc2(hidden_states)
-        hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
-        hidden_states = residual + hidden_states
-
-        outputs = (hidden_states,)
-
-        if output_attentions:
-            outputs += (self_attn_weights, cross_attn_weights)
-
-        return outputs
+    return outputs
 
 
 # Copied from transformers.models.detr.modeling_detr.DetrClassificationHead with Detr->TableTransformer
