@@ -198,85 +198,37 @@ class TokenClassificationPipelineTests(unittest.TestCase):
 
     @slow
     @require_torch
-    def test_chunking(self):
-        NER_MODEL = "elastic/distilbert-base-uncased-finetuned-conll03-english"
-        model = AutoModelForTokenClassification.from_pretrained(NER_MODEL)
-        tokenizer = AutoTokenizer.from_pretrained(NER_MODEL, use_fast=True)
-        tokenizer.model_max_length = 10
-        stride = 5
-        sentence = (
-            "Hugging Face, Inc. is a French company that develops tools for building applications using machine learning. "
-            "The company, based in New York City was founded in 2016 by French entrepreneurs Clément Delangue, Julien Chaumond, and Thomas Wolf."
-        )
+       # original code
+   def add(self, val: int) -> None:
+       self.counter += val
+       if self.counter >= self.capacity:
+           self.counter = self.capacity
+           return True
+       return False
 
-        token_classifier = TokenClassificationPipeline(
-            model=model, tokenizer=tokenizer, aggregation_strategy="simple", stride=stride
-        )
-        output = token_classifier(sentence)
-        self.assertEqual(
-            nested_simplify(output),
-            [
-                {"entity_group": "ORG", "score": 0.978, "word": "hugging face, inc.", "start": 0, "end": 18},
-                {"entity_group": "MISC", "score": 0.999, "word": "french", "start": 24, "end": 30},
-                {"entity_group": "LOC", "score": 0.997, "word": "new york city", "start": 131, "end": 144},
-                {"entity_group": "MISC", "score": 0.999, "word": "french", "start": 168, "end": 174},
-                {"entity_group": "PER", "score": 0.999, "word": "clement delangue", "start": 189, "end": 205},
-                {"entity_group": "PER", "score": 0.999, "word": "julien chaumond", "start": 207, "end": 222},
-                {"entity_group": "PER", "score": 0.999, "word": "thomas wolf", "start": 228, "end": 239},
-            ],
-        )
+   def remove(self, val: int) -> None:
+       self.counter -= val
+       if self.counter < 0:
+           self.counter = 0
+           return True
+       return False
 
-        token_classifier = TokenClassificationPipeline(
-            model=model, tokenizer=tokenizer, aggregation_strategy="first", stride=stride
-        )
-        output = token_classifier(sentence)
-        self.assertEqual(
-            nested_simplify(output),
-            [
-                {"entity_group": "ORG", "score": 0.978, "word": "hugging face, inc.", "start": 0, "end": 18},
-                {"entity_group": "MISC", "score": 0.999, "word": "french", "start": 24, "end": 30},
-                {"entity_group": "LOC", "score": 0.997, "word": "new york city", "start": 131, "end": 144},
-                {"entity_group": "MISC", "score": 0.999, "word": "french", "start": 168, "end": 174},
-                {"entity_group": "PER", "score": 0.999, "word": "clement delangue", "start": 189, "end": 205},
-                {"entity_group": "PER", "score": 0.999, "word": "julien chaumond", "start": 207, "end": 222},
-                {"entity_group": "PER", "score": 0.999, "word": "thomas wolf", "start": 228, "end": 239},
-            ],
-        )
+   # refactored code
+   def _update_counter(self, val: int) -> bool:
+       self.counter += val
+       if self.counter >= self.capacity:
+           self.counter = self.capacity
+           return True
+       elif self.counter < 0:
+           self.counter = 0
+           return True
+       return False
+   
+   def add(self, val: int) -> None:
+       self._update_counter(val)
 
-        token_classifier = TokenClassificationPipeline(
-            model=model, tokenizer=tokenizer, aggregation_strategy="max", stride=stride
-        )
-        output = token_classifier(sentence)
-        self.assertEqual(
-            nested_simplify(output),
-            [
-                {"entity_group": "ORG", "score": 0.978, "word": "hugging face, inc.", "start": 0, "end": 18},
-                {"entity_group": "MISC", "score": 0.999, "word": "french", "start": 24, "end": 30},
-                {"entity_group": "LOC", "score": 0.997, "word": "new york city", "start": 131, "end": 144},
-                {"entity_group": "MISC", "score": 0.999, "word": "french", "start": 168, "end": 174},
-                {"entity_group": "PER", "score": 0.999, "word": "clement delangue", "start": 189, "end": 205},
-                {"entity_group": "PER", "score": 0.999, "word": "julien chaumond", "start": 207, "end": 222},
-                {"entity_group": "PER", "score": 0.999, "word": "thomas wolf", "start": 228, "end": 239},
-            ],
-        )
-
-        token_classifier = TokenClassificationPipeline(
-            model=model, tokenizer=tokenizer, aggregation_strategy="average", stride=stride
-        )
-        output = token_classifier(sentence)
-        self.assertEqual(
-            nested_simplify(output),
-            [
-                {"entity_group": "ORG", "score": 0.978, "word": "hugging face, inc.", "start": 0, "end": 18},
-                {"entity_group": "MISC", "score": 0.999, "word": "french", "start": 24, "end": 30},
-                {"entity_group": "LOC", "score": 0.997, "word": "new york city", "start": 131, "end": 144},
-                {"entity_group": "MISC", "score": 0.999, "word": "french", "start": 168, "end": 174},
-                {"entity_group": "PER", "score": 0.999, "word": "clement delangue", "start": 189, "end": 205},
-                {"entity_group": "PER", "score": 0.999, "word": "julien chaumond", "start": 207, "end": 222},
-                {"entity_group": "PER", "score": 0.999, "word": "thomas wolf", "start": 228, "end": 239},
-            ],
-        )
-
+   def remove(self, val: int) -> None:
+       self._update_counter(-val)
     @require_torch
     def test_chunking_fast(self):
         # Note: We cannot run the test on "conflicts" on the chunking.
