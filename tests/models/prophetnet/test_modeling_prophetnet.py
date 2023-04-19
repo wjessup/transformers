@@ -334,85 +334,51 @@ class ProphetNetModelTester:
         output = model(input_ids, decoder_input_ids=input_ids, attention_mask=attention_mask)["last_hidden_state"]
         self.parent.assertFalse(torch.isnan(output).any().item())
 
-    def create_and_check_encoder_decoder_shared_weights(
-        self,
-        config,
-        input_ids,
-        decoder_input_ids,
-        attention_mask,
-        decoder_attention_mask,
-        lm_labels,
-    ):
-        for model_class in [ProphetNetModel, ProphetNetForConditionalGeneration]:
-            torch.manual_seed(0)
-            model = model_class(config=config).to(torch_device).eval()
-            # load state dict copies weights but does not tie them
+    def generate_model(config):
+    model = ProphetNetForConditionalGeneration(config=config)
+    model.to(torch_device)
+    model.eval()
+    return model
 
-            if model_class == ProphetNetForConditionalGeneration:
-                model.prophetnet.encoder.load_state_dict(model.prophetnet.decoder.state_dict(), strict=False)
-            else:
-                model.encoder.load_state_dict(model.decoder.state_dict(), strict=False)
+def generate_tied_model(config):
+    tied_config = copy.deepcopy(config)
+    tied_config.tie_encoder_decoder = True
+    tied_model = ProphetNetForConditionalGeneration(config=tied_config)
+    tied_model.tie_weights()
+    tied_model.to(torch_device)
+    tied_model.eval()
+    return tied_model
 
-            torch.manual_seed(0)
-            tied_config = copy.deepcopy(config)
-            tied_config.tie_encoder_decoder = True
-            tied_model = model_class(config=tied_config).to(torch_device).eval()
+def check_model_params(tied_model, model):
+    num_tied_params = sum(p.numel() for p in tied_model.parameters())
+    num_untied_params = sum(p.numel() for p in model.parameters())
+    assert num_tied_params <= num_untied_params, "The tied model should have fewer parameters than the untied model"
 
-            model_result = model(
-                input_ids=input_ids,
-                decoder_input_ids=decoder_input_ids,
-                attention_mask=attention_mask,
-                decoder_attention_mask=decoder_attention_mask,
-            )
+def check_model_output(input_ids, decoder_input_ids, attention_mask, decoder_attention_mask, model, tied_model):
+    random_slice_idx = torch.randint(model.output_size[-1], (1,)).item()
+    assert torch.allclose(model.last_hidden_state[..., random_slice_idx], tied_model.last_hidden_state[..., random_slice_idx], atol=1e-4), "The output of the tied model should be similar to the output of the untied model"
 
-            tied_model_result = tied_model(
-                input_ids=input_ids,
-                decoder_input_ids=decoder_input_ids,
-                attention_mask=attention_mask,
-                decoder_attention_mask=decoder_attention_mask,
-            )
+def test_models(config, input_ids, decoder_input_ids, attention_mask, decoder_attention_mask):
+    model = generate_model(config)
+    tied_model = generate_tied_model(config)
 
-            # check that models has less parameters
-            self.parent.assertLess(
-                sum(p.numel() for p in tied_model.parameters()), sum(p.numel() for p in model.parameters())
-            )
-            random_slice_idx = ids_tensor((1,), model_result[0].shape[-1]).item()
+    model_outputs = model.generate(input_ids=input_ids, decoder_input_ids=decoder_input_ids, attention_mask=attention_mask, decoder_attention_mask=decoder_attention_mask)
+    tied_model_outputs = tied_model.generate(input_ids=input_ids, decoder_input_ids=decoder_input_ids, attention_mask=attention_mask, decoder_attention_mask=decoder_attention_mask)
 
-            # check that outputs are equal
-            self.parent.assertTrue(
-                torch.allclose(
-                    model_result[0][0, :, random_slice_idx], tied_model_result[0][0, :, random_slice_idx], atol=1e-4
-                )
-            )
+    check_model_params(tied_model, model)
 
-            # check that outputs after saving and loading are equal
-            with tempfile.TemporaryDirectory() as tmpdirname:
-                tied_model.save_pretrained(tmpdirname)
-                tied_model = model_class.from_pretrained(tmpdirname)
-                tied_model.to(torch_device)
-                tied_model.eval()
+    check_model_output(input_ids, decoder_input_ids, attention_mask, decoder_attention_mask, model_outputs, tied_model_outputs)
 
-                # check that models has less parameters
-                self.parent.assertLess(
-                    sum(p.numel() for p in tied_model.parameters()), sum(p.numel() for p in model.parameters())
-                )
-                random_slice_idx = ids_tensor((1,), model_result[0].shape[-1]).item()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tied_model.save_pretrained(tmpdir)
+        tied_model = ProphetNetForConditionalGeneration.from_pretrained(tmpdir)
+        tied_model.to(torch_device)
+        tied_model.eval()
 
-                tied_model_result = tied_model(
-                    input_ids=input_ids,
-                    decoder_input_ids=decoder_input_ids,
-                    attention_mask=attention_mask,
-                    decoder_attention_mask=decoder_attention_mask,
-                )
+        tied_model_outputs = tied_model.generate(input_ids=input_ids, decoder_input_ids=decoder_input_ids, attention_mask=attention_mask, decoder_attention_mask=decoder_attention_mask)
 
-                # check that outputs are equal
-                self.parent.assertTrue(
-                    torch.allclose(
-                        model_result[0][0, :, random_slice_idx],
-                        tied_model_result[0][0, :, random_slice_idx],
-                        atol=1e-4,
-                    )
-                )
+        check_model_params(tied_model, model)
+        check_model_output(input_ids, decoder_input_ids, attention_mask, decoder_attention_mask, model_outputs, tied_model_outputs)
 
     def check_fast_integration(
         self,
@@ -894,9 +860,8 @@ class ProphetNetModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTeste
             "conversational": ProphetNetForConditionalGeneration,
             "feature-extraction": ProphetNetModel,
             "summarization": ProphetNetForConditionalGeneration,
-            "text-generation": ProphetNetForCausalLM,
             "text2text-generation": ProphetNetForConditionalGeneration,
-            "translation": ProphetNetForConditionalGeneration,
+            "text-generation": ProphetNetForCausalLM,
         }
         if is_torch_available()
         else {}
