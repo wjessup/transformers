@@ -659,85 +659,113 @@ class BatchEncoding(UserDict):
             char_index = batch_or_char_index
         return self._encodings[batch_index].char_to_word(char_index, sequence_index)
 
-    def convert_to_tensors(
-        self, tensor_type: Optional[Union[str, TensorType]] = None, prepend_batch_axis: bool = False
-    ):
-        """
-        Convert the inner content to tensors.
+    def convert_to_tensors(self, tensor_type: Optional[Union[str, TensorType]] = None, prepend_dim: Optional[Union[str, int]] = None):
+    """
+    Convert the inner content to tensors.
 
-        Args:
-            tensor_type (`str` or [`~utils.TensorType`], *optional*):
-                The type of tensors to use. If `str`, should be one of the values of the enum [`~utils.TensorType`]. If
-                `None`, no modification is done.
-            prepend_batch_axis (`int`, *optional*, defaults to `False`):
-                Whether or not to add the batch dimension during the conversion.
-        """
-        if tensor_type is None:
-            return self
+    Args:
+        tensor_type (`str` or [`~utils.TensorType`], *optional*):
+            The type of tensors to use. If `str`, should be one of the values of the enum [`~utils.TensorType`]. If
+            `None`, no modification is done.
+        prepend_dim (`str` or `int`, *optional`, defaults to `None`):
+            If not `None`, the specified dimension is prepended to the tensor instead of the batch dimension. If `str`,
+            should be one of `batch`, `time`, `sequence` or `channel`. If `int`, the prepended dimension is the specified
+            integer value.
+    """
+    if tensor_type is None:
+        return self
 
-        # Convert to TensorType
-        if not isinstance(tensor_type, TensorType):
-            tensor_type = TensorType(tensor_type)
+    # Convert to TensorType enum if `tensor_type` is a string
+    if isinstance(tensor_type, str):
+        tensor_type = TensorType[tensor_type.upper()]
 
-        # Get a function reference for the correct framework
-        if tensor_type == TensorType.TENSORFLOW:
-            if not is_tf_available():
-                raise ImportError(
-                    "Unable to convert output to TensorFlow tensors format, TensorFlow is not installed."
-                )
-            import tensorflow as tf
+    as_tensor = None
+    is_tensor = None
 
-            as_tensor = tf.constant
-            is_tensor = tf.is_tensor
-        elif tensor_type == TensorType.PYTORCH:
-            if not is_torch_available():
-                raise ImportError("Unable to convert output to PyTorch tensors format, PyTorch is not installed.")
-            import torch
+    # Get a function reference for the correct framework
+    if tensor_type == TensorType.TENSORFLOW:
+        if not is_tf_available():
+            raise ImportError("Unable to convert output to TensorFlow tensors format, TensorFlow is not installed.")
+        import tensorflow as tf
+      
+        is_tensor = tf.is_tensor
+        as_tensor = tf.constant if prepend_dim is None else tf.convert_to_tensor
+    elif tensor_type == TensorType.PYTORCH:
+        if not is_torch_available():
+            raise ImportError("Unable to convert output to PyTorch tensors format, PyTorch is not installed.")
+        import torch
+      
+        is_tensor = torch.is_tensor
+        as_tensor = torch.tensor if prepend_dim is None else torch.as_tensor
+    elif tensor_type == TensorType.JAX:
+        if not is_flax_available():
+            raise ImportError("Unable to convert output to JAX tensors format, JAX is not installed.")
+        import jax.numpy as jnp  # noqa: F811
+  
+        is_tensor = is_jax_tensor
+        as_tensor = jnp.array if prepend_dim is None else jnp.asarray
+    elif tensor_type == TensorType.NUMPY:
+        is_tensor = is_numpy_array
+        as_tensor = np.asarray if prepend_dim is None else np.array
+    else:
+        raise ValueError(f"Invalid tensor type provided: {tensor_type}.")
 
-            as_tensor = torch.tensor
-            is_tensor = torch.is_tensor
-        elif tensor_type == TensorType.JAX:
-            if not is_flax_available():
-                raise ImportError("Unable to convert output to JAX tensors format, JAX is not installed.")
-            import jax.numpy as jnp  # noqa: F811
+    # Do the tensor conversion
+    for key, value in self.items():
+        try:
+            if not is_tensor(value):
+                tensor = as_tensor(value)
+                if prepend_dim is not None:
+                    tensor = _prepend_dim(tensor, prepend_dim)
 
-            as_tensor = jnp.array
-            is_tensor = is_jax_tensor
-        else:
-            as_tensor = np.asarray
-            is_tensor = is_numpy_array
-
-        # Do the tensor conversion in batch
-        for key, value in self.items():
-            try:
-                if prepend_batch_axis:
-                    value = [value]
-
-                if not is_tensor(value):
-                    tensor = as_tensor(value)
-
-                    # Removing this for now in favor of controlling the shape with `prepend_batch_axis`
-                    # # at-least2d
-                    # if tensor.ndim > 2:
-                    #     tensor = tensor.squeeze(0)
-                    # elif tensor.ndim < 2:
-                    #     tensor = tensor[None, :]
-
-                    self[key] = tensor
-            except Exception as e:
-                if key == "overflowing_tokens":
-                    raise ValueError(
-                        "Unable to create tensor returning overflowing tokens of different lengths. "
-                        "Please see if a fast version of this tokenizer is available to have this feature available."
-                    ) from e
+                self[key] = tensor
+        except Exception as e:
+            if key == "overflowing_tokens":
                 raise ValueError(
-                    "Unable to create tensor, you should probably activate truncation and/or padding with"
-                    " 'padding=True' 'truncation=True' to have batched tensors with the same length. Perhaps your"
-                    f" features (`{key}` in this case) have excessive nesting (inputs type `list` where type `int` is"
-                    " expected)."
+                    "Unable to create tensor returning overflowing tokens of different lengths. "
+                    "Please see if a fast version of this tokenizer is available to have this feature available."
                 ) from e
 
-        return self
+            raise ValueError(
+                f"Unable to create tensor for feature `{key}`. "
+                f"The following error occurred:\n {e.__class__.__name__}: {str(e)}"
+            ) from e
+
+    return self
+
+
+def _prepend_dim(tensor: np.ndarray, dim: Union[str, int]) -> np.ndarray:
+    """
+    Prepend a new dimension to a tensor.
+
+    Args:
+        tensor (`np.ndarray`):
+            The input tensor.
+        dim (`str` or `int`):
+            If `str`, should be one of `batch`, `time`, `sequence` or `channel`. If `int`, the prepended dimension
+            is the specified integer value.
+
+    Returns:
+        The tensor with an added dimension.
+    """
+    tensor_dim = tensor.ndim
+
+    # Map string argument to dimension index
+    if isinstance(dim, str):
+        dim_map = {"batch": 0, "time": 1, "sequence": 1, "channel": -1}
+        dim = dim_map[dim]
+
+    # Check dimension index bounds
+    if not -tensor_dim - 1 <= dim <= tensor_dim:
+        raise ValueError(f"Invalid dimension index `{dim}` for tensor with shape {tensor.shape}.")
+
+    # Add new dimension
+    if dim >= 0:
+        tensor = np.expand_dims(tensor, axis=dim)
+    else:
+        tensor = tensor.reshape(*tensor.shape[:-1], 1, tensor.shape[-1])
+
+    return tensor
 
     def to(self, device: Union[str, "torch.device"]) -> "BatchEncoding":
         """
@@ -2163,7 +2191,6 @@ class PreTrainedTokenizerBase(SpecialTokensMixin, PushToHubMixin):
         # remove private information
         if "name_or_path" in tokenizer_config:
             tokenizer_config.pop("name_or_path")
-            tokenizer_config.pop("special_tokens_map_file", None)
 
         with open(tokenizer_config_file, "w", encoding="utf-8") as f:
             out_str = json.dumps(tokenizer_config, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
