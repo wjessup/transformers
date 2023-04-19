@@ -468,85 +468,46 @@ def cached_file(
     return resolved_file
 
 
-def get_file_from_repo(
-    path_or_repo: Union[str, os.PathLike],
-    filename: str,
-    cache_dir: Optional[Union[str, os.PathLike]] = None,
-    force_download: bool = False,
-    resume_download: bool = False,
-    proxies: Optional[Dict[str, str]] = None,
-    use_auth_token: Optional[Union[bool, str]] = None,
-    revision: Optional[str] = None,
-    local_files_only: bool = False,
-    subfolder: str = "",
-):
+import os
+import requests
+import urllib.request
+from typing import Optional, Union, Dict
+
+
+def download_file(file_path: str, cache_dir: str, use_auth_token: Optional[Union[bool, str]] = False,
+                  proxies: Optional[Dict[str, str]] = None) -> Optional[str]:
     """
-    Tries to locate a file in a local folder and repo, downloads and cache it if necessary.
+    Tries to retrieve a file from a local directory or a remote url.
+    Downloads and caches the file if it is not available locally.
 
-    Args:
-        path_or_repo (`str` or `os.PathLike`):
-            This can be either:
+    :param file_path: The path to the file required.
+    :param cache_dir: The dir to use for caching the file
+    :param use_auth_token: If an auth token is needed to download a file, the token is passed as a boolean or string value.
+    :param proxies: A dictionary of proxy servers to use by protocol or endpoint, e.g., {'http': 'foo.bar:3128',
+            'http://hostname': 'foo.bar:4012'}.
+    :return: Returns the resolved file (to the cache folder if downloaded from a remote url) or None
+            if the file does not exist.
+    """
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        local_cache_file = os.path.join(cache_dir, os.path.basename(file_path))
+        if not os.path.exists(local_cache_file):
+            headers = {
+                'Authorization': f'Bearer {use_auth_token}',
+            } if use_auth_token else {}
+            try:
+                response = requests.get(file_path, headers=headers, proxies=proxies, timeout=(5.0, 10.0))
+                response.raise_for_status()
+                with open(local_cache_file, 'wb') as fp:
+                    fp.write(response.content)
+                    return local_cache_file
+            except requests.exceptions.RequestException:
+                raise FileNotFoundError(f'Failed to download the file from {file_path}. Verify the URL and network '
+                                        f'connection.')
+        return local_cache_file
 
-            - a string, the *model id* of a model repo on huggingface.co.
-            - a path to a *directory* potentially containing the file.
-        filename (`str`):
-            The name of the file to locate in `path_or_repo`.
-        cache_dir (`str` or `os.PathLike`, *optional*):
-            Path to a directory in which a downloaded pretrained model configuration should be cached if the standard
-            cache should not be used.
-        force_download (`bool`, *optional*, defaults to `False`):
-            Whether or not to force to (re-)download the configuration files and override the cached versions if they
-            exist.
-        resume_download (`bool`, *optional*, defaults to `False`):
-            Whether or not to delete incompletely received file. Attempts to resume the download if such a file exists.
-        proxies (`Dict[str, str]`, *optional*):
-            A dictionary of proxy servers to use by protocol or endpoint, e.g., `{'http': 'foo.bar:3128',
-            'http://hostname': 'foo.bar:4012'}.` The proxies are used on each request.
-        use_auth_token (`str` or *bool*, *optional*):
-            The token to use as HTTP bearer authorization for remote files. If `True`, will use the token generated
-            when running `huggingface-cli login` (stored in `~/.huggingface`).
-        revision (`str`, *optional*, defaults to `"main"`):
-            The specific model version to use. It can be a branch name, a tag name, or a commit id, since we use a
-            git-based system for storing models and other artifacts on huggingface.co, so `revision` can be any
-            identifier allowed by git.
-        local_files_only (`bool`, *optional*, defaults to `False`):
-            If `True`, will only try to load the tokenizer configuration from local files.
-        subfolder (`str`, *optional*, defaults to `""`):
-            In case the relevant files are located inside a subfolder of the model repo on huggingface.co, you can
-            specify the folder name here.
-
-    <Tip>
-
-    Passing `use_auth_token=True` is required when you want to use a private model.
-
-    </Tip>
-
-    Returns:
-        `Optional[str]`: Returns the resolved file (to the cache folder if downloaded from a repo) or `None` if the
-        file does not exist.
-
-    Examples:
-
-    ```python
-    # Download a tokenizer configuration from huggingface.co and cache.
-    tokenizer_config = get_file_from_repo("bert-base-uncased", "tokenizer_config.json")
-    # This model does not have a tokenizer config so the result will be None.
-    tokenizer_config = get_file_from_repo("xlm-roberta-base", "tokenizer_config.json")
-    ```"""
-    return cached_file(
-        path_or_repo_id=path_or_repo,
-        filename=filename,
-        cache_dir=cache_dir,
-        force_download=force_download,
-        resume_download=resume_download,
-        proxies=proxies,
-        use_auth_token=use_auth_token,
-        revision=revision,
-        local_files_only=local_files_only,
-        subfolder=subfolder,
-        _raise_exceptions_for_missing_entries=False,
-        _raise_exceptions_for_connection_errors=False,
-    )
+    except FileNotFoundError:
+        return None
 
 
 def download_url(url, proxies=None):
