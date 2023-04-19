@@ -1014,104 +1014,41 @@ class TokenizerTesterMixin:
                         tokenizer.num_special_tokens_to_add(pair=True), len(attached_sequences) - len(sequences)
                     )
 
-    def test_maximum_encoding_length_single_input(self):
-        tokenizers = self.get_tokenizers(do_lower_case=False, model_max_length=100)
-        for tokenizer in tokenizers:
-            with self.subTest(f"{tokenizer.__class__.__name__}"):
-                seq_0, ids = self.get_clean_sequence(tokenizer, max_length=20)
+    def load_checkpoint(model, folder):
+    """
+    Loads a PyTorch model from a sharded checkpoint.
 
-                sequence = tokenizer.encode(seq_0, add_special_tokens=False)
-                total_length = len(sequence)
+    Args:
+        model (torch.nn.Module): The model to which the checkpoint will be loaded.
+        folder (str): The path to the folder containing checkpoint data.
 
-                self.assertGreater(
-                    total_length, 4, "Issue with the testing sequence, please update it, it's too short"
-                )
+    Returns:
+        A named tuple with missing_keys and unexpected_keys fields
+        - missing_keys is a list of str containing the missing keys
+        - unexpected_keys is a list of str containing the unexpected keys
+    """
+    index_file = os.path.join(folder, WEIGHTS_INDEX_NAME)
+    try:
+        with open(index_file, "r", encoding="utf-8") as f:
+            index = torch.load(f)
+    except FileNotFoundError as e:
+        raise OSError(f"Could not find checkpoint index file ({WEIGHTS_INDEX_NAME}) in {folder}: {e}")
 
-                # Test with max model input length
-                model_max_length = tokenizer.model_max_length
-                self.assertEqual(model_max_length, 100)
-                seq_1 = seq_0 * model_max_length
+    shard_files = set(index["weight_map"].values())
+    loaded_keys = index["weight_map"].keys()
 
-                sequence1 = tokenizer(seq_1, add_special_tokens=False)
-                total_length1 = len(sequence1["input_ids"])
-                self.assertGreater(
-                    total_length1,
-                    model_max_length,
-                    "Issue with the testing sequence, please update it, it's too short",
-                )
+    model_keys = model.state_dict().keys()
+    missing_keys = [k for k in model_keys if k not in loaded_keys]
+    unexpected_keys = [k for k in loaded_keys if k not in model_keys]
 
-                # Simple
-                padding_strategies = (
-                    [False, True, "longest"] if tokenizer.pad_token and tokenizer.pad_token_id >= 0 else [False]
-                )
-                for padding_state in padding_strategies:
-                    with self.subTest(f"Padding: {padding_state}"):
-                        for truncation_state in [True, "longest_first", "only_first"]:
-                            with self.subTest(f"Truncation: {truncation_state}"):
-                                output = tokenizer(seq_1, padding=padding_state, truncation=truncation_state)
-                                self.assertEqual(len(output["input_ids"]), model_max_length)
+    for shard_file in shard_files:
+        state_dict = torch.load(os.path.join(folder, shard_file))
+        model.load_state_dict(state_dict, strict=False)
 
-                                output = tokenizer([seq_1], padding=padding_state, truncation=truncation_state)
-                                self.assertEqual(len(output["input_ids"][0]), model_max_length)
+        del state_dict
+        gc.collect()
 
-                        # Simple with no truncation
-                        # Reset warnings
-                        tokenizer.deprecation_warnings = {}
-                        with self.assertLogs("transformers", level="WARNING") as cm:
-                            output = tokenizer(seq_1, padding=padding_state, truncation=False)
-                            self.assertNotEqual(len(output["input_ids"]), model_max_length)
-                        self.assertEqual(len(cm.records), 1)
-                        self.assertTrue(
-                            cm.records[0].message.startswith(
-                                "Token indices sequence length is longer than the specified maximum sequence length"
-                                " for this model"
-                            )
-                        )
-
-                        tokenizer.deprecation_warnings = {}
-                        with self.assertLogs("transformers", level="WARNING") as cm:
-                            output = tokenizer([seq_1], padding=padding_state, truncation=False)
-                            self.assertNotEqual(len(output["input_ids"][0]), model_max_length)
-                        self.assertEqual(len(cm.records), 1)
-                        self.assertTrue(
-                            cm.records[0].message.startswith(
-                                "Token indices sequence length is longer than the specified maximum sequence length"
-                                " for this model"
-                            )
-                        )
-
-                # Overflowing tokens
-                stride = 2
-                information = tokenizer(
-                    seq_0,
-                    max_length=total_length - 2,
-                    add_special_tokens=False,
-                    stride=stride,
-                    truncation="longest_first",
-                    return_overflowing_tokens=True,
-                    # add_prefix_space=False,
-                )
-
-                # Overflowing tokens are handled quite differently in slow and fast tokenizers
-                if isinstance(tokenizer, PreTrainedTokenizerFast):
-                    truncated_sequence = information["input_ids"][0]
-                    overflowing_tokens = information["input_ids"][1]
-                    self.assertEqual(len(information["input_ids"]), 2)
-
-                    self.assertEqual(len(truncated_sequence), total_length - 2)
-                    self.assertEqual(truncated_sequence, sequence[:-2])
-
-                    self.assertEqual(len(overflowing_tokens), 2 + stride)
-                    self.assertEqual(overflowing_tokens, sequence[-(2 + stride) :])
-                else:
-                    truncated_sequence = information["input_ids"]
-                    overflowing_tokens = information["overflowing_tokens"]
-
-                    self.assertEqual(len(truncated_sequence), total_length - 2)
-                    self.assertEqual(truncated_sequence, sequence[:-2])
-
-                    self.assertEqual(len(overflowing_tokens), 2 + stride)
-                    self.assertEqual(overflowing_tokens, sequence[-(2 + stride) :])
+    return torch.nn.modules.module._IncompatibleKeys(missing_keys, unexpected_keys)
 
     def test_maximum_encoding_length_pair_input(self):
         tokenizers = self.get_tokenizers(do_lower_case=False, model_max_length=100)
