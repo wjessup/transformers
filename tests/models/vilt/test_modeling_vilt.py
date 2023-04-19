@@ -344,85 +344,86 @@ class ViltModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
     def test_model_outputs_equivalence(self):
         pass
 
-    def test_attention_outputs(self):
-        config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
-        config.return_dict = True
+    from collections import namedtuple
 
-        seq_len = getattr(self.model_tester, "expected_seq_len", None)
+TestConfig = namedtuple("TestConfig", ["return_dict", "output_attentions", "output_hidden_states", "is_encoder_decoder"])
 
-        for model_class in self.all_model_classes:
-            inputs_dict["output_attentions"] = True
-            inputs_dict["output_hidden_states"] = False
-            config.return_dict = True
-            model = model_class(config)
-            model.to(torch_device)
-            model.eval()
-            with torch.no_grad():
-                outputs = model(**self._prepare_for_class(inputs_dict, model_class))
-            attentions = outputs.attentions
-            if model_class.__name__ == "ViltForImagesAndTextClassification":
-                # attentions are a list of length num_images
-                # each element contains the attentions of a particular image index
-                self.assertEqual(len(attentions), self.model_tester.num_images)
-                self.assertEqual(len(attentions[0]), self.model_tester.num_hidden_layers)
-            else:
-                self.assertEqual(len(attentions), self.model_tester.num_hidden_layers)
 
-            # check that output_attentions also work using config
-            del inputs_dict["output_attentions"]
-            config.output_attentions = True
-            model = model_class(config)
-            model.to(torch_device)
-            model.eval()
-            with torch.no_grad():
-                outputs = model(**self._prepare_for_class(inputs_dict, model_class))
-            attentions = outputs.attentions
-            if model_class.__name__ == "ViltForImagesAndTextClassification":
-                # attentions are a list of length num_images
-                # each element contains the attentions of a particular image index
-                self.assertEqual(len(attentions), self.model_tester.num_images)
-                self.assertEqual(len(attentions[0]), self.model_tester.num_hidden_layers)
-            else:
-                self.assertEqual(len(attentions), self.model_tester.num_hidden_layers)
+def obtain_model_and_output(model_class, config, inputs_dict, seq_len, torch_device):
+    inputs_dict["output_attentions"] = True
+    inputs_dict["output_hidden_states"] = False
+    config.return_dict = True
 
-            if model_class.__name__ == "ViltForImagesAndTextClassification":
-                self.assertListEqual(
-                    list(attentions[0][0].shape[-3:]),
-                    [self.model_tester.num_attention_heads, seq_len, seq_len],
-                )
-            else:
-                self.assertListEqual(
-                    list(attentions[0].shape[-3:]),
-                    [self.model_tester.num_attention_heads, seq_len, seq_len],
-                )
-            out_len = len(outputs)
+    model = model_class(config)
+    model.to(torch_device)
+    model.eval()
 
-            # Check attention is always last and order is fine
-            inputs_dict["output_attentions"] = True
-            inputs_dict["output_hidden_states"] = True
-            model = model_class(config)
-            model.to(torch_device)
-            model.eval()
-            with torch.no_grad():
-                outputs = model(**self._prepare_for_class(inputs_dict, model_class))
+    with torch.no_grad():
+        outputs = model(**obtain_model_inputs(inputs_dict, model, seq_len))
 
-            self.assertEqual(out_len + 1, len(outputs))
+    return model, outputs
 
-            self_attentions = outputs.encoder_attentions if config.is_encoder_decoder else outputs.attentions
 
-            if model_class.__name__ == "ViltForImagesAndTextClassification":
-                self.assertEqual(len(self_attentions), self.model_tester.num_images)
-                self.assertEqual(len(self_attentions[0]), self.model_tester.num_hidden_layers)
-                self.assertListEqual(
-                    list(self_attentions[0][0].shape[-3:]),
-                    [self.model_tester.num_attention_heads, seq_len, seq_len],
-                )
-            else:
-                self.assertEqual(len(self_attentions), self.model_tester.num_hidden_layers)
-                self.assertListEqual(
-                    list(self_attentions[0].shape[-3:]),
-                    [self.model_tester.num_attention_heads, seq_len, seq_len],
-                )
+def obtain_model_inputs(inputs, model, seq_len):
+    if isinstance(inputs["image_data"], (tuple, list)):
+        inputs_dict = {"input_ids": inputs["input_ids"], "attention_mask": inputs["attention_mask"],
+                       "image_data": inputs["image_data"]}
+    else:
+        inputs_dict = {"input_ids": inputs["input_ids"], "attention_mask": inputs["attention_mask"],
+                       "image_data": [inputs["image_data"]]}
+
+    return inputs_dict
+
+
+def test_attention_outputs(self):
+    config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
+    config = TestConfig(return_dict=True, output_attentions=True, output_hidden_states=False, is_encoder_decoder=False)
+
+    seq_len = getattr(self.model_tester, "expected_seq_len", None)
+
+    for model_class in self.all_model_classes:
+        model, outputs = obtain_model_and_output(model_class, config, inputs_dict, seq_len, torch_device)
+        attentions = outputs.attentions
+
+        if isinstance(inputs_dict["image_data"], list):
+            self.assertEqual(len(attentions), self.model_tester.num_images)
+        self.assertEqual(len(attentions[0]), self.model_tester.num_hidden_layers)
+        self.assertListEqual(
+            list(attentions[0][0].shape[-3:]),
+            [self.model_tester.num_attention_heads, seq_len, seq_len],
+        )
+
+        # check that output_attentions also work using config
+        config = TestConfig(return_dict=True, output_attentions=True, output_hidden_states=False, is_encoder_decoder=False)
+        del inputs_dict["output_attentions"]
+        model, outputs = obtain_model_and_output(model_class, config, inputs_dict, seq_len, torch_device)
+        attentions = outputs.attentions
+
+        if isinstance(inputs_dict["image_data"], list):
+            self.assertEqual(len(attentions), self.model_tester.num_images)
+        self.assertEqual(len(attentions[0]), self.model_tester.num_hidden_layers)
+        self.assertListEqual(
+            list(attentions[0][0].shape[-3:]),
+            [self.model_tester.num_attention_heads, seq_len, seq_len],
+        )
+
+        out_len = len(outputs)
+
+        # Check attention is always last and order is fine
+        config = TestConfig(return_dict=True, output_attentions=True, output_hidden_states=True, is_encoder_decoder=True)
+        model, outputs = obtain_model_and_output(model_class, config, inputs_dict, seq_len, torch_device)
+
+        self.assertEqual(out_len + 1, len(outputs))
+
+        attentions = outputs.encoder_attentions if config.is_encoder_decoder else outputs.attentions
+
+        if isinstance(inputs_dict["image_data"], list):
+            self.assertEqual(len(attentions), self.model_tester.num_images)
+        self.assertEqual(len(attentions[0]), self.model_tester.num_hidden_layers)
+        self.assertListEqual(
+            list(attentions[0][0].shape[-3:]),
+            [self.model_tester.num_attention_heads, seq_len, seq_len],
+        )
 
     def test_hidden_states_output(self):
         def check_hidden_states_output(inputs_dict, config, model_class):
