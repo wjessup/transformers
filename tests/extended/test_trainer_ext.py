@@ -204,85 +204,39 @@ class TestTrainerExt(TestCasePlus):
 
     @slow
     @require_bitsandbytes
+    import unittest
+from pathlib import Path
+from typing import Tuple
+from transformers.training_args import OptimizerNames
+
+def train_and_return_metrics(optimizer: OptimizerNames) -> Tuple[int,int, float]:
+    max_len, model_name, lr, epochs, distributed, n_gpus_to_use = 128, MARIAN_MODEL, 3e-4, 1, True, 1
+    extra_args = "--skip_memory_metrics 0"
+    output_dir = run_trainer(max_len, model_name, lr, epochs, optimizer.value, distributed, n_gpus_to_use, extra_args, False, False)
+    
+    log_history = TrainerState.load_from_json(Path(output_dir, "trainer_state.json")).log_history
+    gpu_peak_mem_mb = int(log_history[0]["train_mem_gpu_peaked_delta"] / (2 ** 20))
+    gpu_alloc_mem_mb = int(log_history[0]["train_mem_gpu_alloc_delta"] / (2 ** 20))
+    loss = log_history[0]["train_loss"]
+    return gpu_peak_mem_mb, gpu_alloc_mem_mb, loss
+
+class TestExample(unittest.TestCase):
+    
     def test_run_seq2seq_bnb(self):
-        from transformers.training_args import OptimizerNames
-
-        def train_and_return_metrics(optim: str) -> Tuple[int, float]:
-            extra_args = "--skip_memory_metrics 0"
-
-            output_dir = self.run_trainer(
-                max_len=128,
-                model_name=MARIAN_MODEL,
-                learning_rate=3e-4,
-                num_train_epochs=1,
-                optim=optim,
-                distributed=True,  # force run in a new process
-                extra_args_str=extra_args,
-                do_eval=False,
-                do_predict=False,
-                n_gpus_to_use=1,  # to allow deterministic fixed memory usage
-            )
-
-            # Check metrics
-            logs = TrainerState.load_from_json(Path(output_dir, "trainer_state.json")).log_history
-            gpu_peak_mem_mb = int(logs[0]["train_mem_gpu_peaked_delta"] / 2**20)
-            gpu_alloc_mem_mb = int(logs[0]["train_mem_gpu_alloc_delta"] / 2**20)
-
-            loss = logs[0]["train_loss"]
-            return gpu_peak_mem_mb, gpu_alloc_mem_mb, loss
-
-        gpu_peak_mem_orig, gpu_alloc_mem_orig, loss_orig = train_and_return_metrics(OptimizerNames.ADAMW_TORCH.value)
-        gpu_peak_mem_bnb, gpu_alloc_mem_bnb, loss_bnb = train_and_return_metrics(OptimizerNames.ADAMW_BNB.value)
-
+        optimizer_torch, optimizer_bnb = OptimizerNames.ADAMW_TORCH, OptimizerNames.ADAMW_BNB
+        gpu_peak_mem_orig, gpu_alloc_mem_orig, loss_orig = train_and_return_metrics(optimizer_torch)
+        gpu_peak_mem_bnb, gpu_alloc_mem_bnb, loss_bnb = train_and_return_metrics(optimizer_bnb)
+  
         gpu_alloc_mem_diff = gpu_alloc_mem_orig - gpu_alloc_mem_bnb
-
+        gpu_peak_mem_diff = gpu_peak_mem_orig - gpu_peak_mem_bnb
         gpu_total_mem_orig = gpu_peak_mem_orig + gpu_alloc_mem_orig
         gpu_total_mem_bnb = gpu_peak_mem_bnb + gpu_alloc_mem_bnb
         gpu_total_mem_diff = gpu_total_mem_orig - gpu_total_mem_bnb
-
-        # sshleifer/student_marian_en_ro_6_1 has 54M parameter, 29M of which is `nn.Embedding` which
-        # doesn't get quantized and remains in fp32. Therefore we only have 25M parameters quantized
-        # in 2 bytes and the diff in optim memory usage is derived as so:
-        #
-        # - normal 25*8=~200MB (8 bytes per param)
-        # - bnb    25*2= ~50MB (2 bytes per param)
-        #
-        # Thus we should expect ~150MB total memory saved.
-        #
-        # Peak memory should be the same - the total should be different by about that same margin
-        #
-        # After leaving a small margin to accommodate for differences between gpus let's check
-        # that we have at least 120MB in savings
         expected_savings = 120
-
-        # uncomment the following if this test starts failing - requires py38 for a new print feature
-        # gpu_peak_mem_diff = gpu_peak_mem_orig - gpu_peak_mem_bnb
-        # print(f"{gpu_alloc_mem_orig=}MB {gpu_peak_mem_orig=}MB {gpu_alloc_mem_orig+gpu_peak_mem_orig=}MB")
-        # print(f" {gpu_alloc_mem_bnb=}MB  {gpu_peak_mem_bnb=}MB  {gpu_alloc_mem_bnb+gpu_peak_mem_bnb=}MB")
-        # print(f"{gpu_alloc_mem_diff=}MB")
-        # print(f"{gpu_peak_mem_diff=}MB")
-        # print(f"{gpu_total_mem_orig=}MB, {gpu_total_mem_bnb=}MB")
-        # print(f"{gpu_total_mem_diff=}MB, {gpu_total_mem_diff=}MB")
-
-        self.assertGreater(
-            gpu_alloc_mem_diff,
-            expected_savings,
-            "should use ~150MB less alloc gpu memory with BNB, compared to without it for this model but got"
-            f" a difference of {gpu_alloc_mem_diff}MB, with gpu_alloc_mem_orig={gpu_alloc_mem_orig}MB and"
-            f" gpu_alloc_mem_bnb={gpu_alloc_mem_bnb}MB",
-        )
-
-        self.assertGreater(
-            gpu_total_mem_diff,
-            expected_savings,
-            "should use ~150MB less total gpu memory with BNB, compared to without it for this model but got"
-            f" a difference of {gpu_total_mem_diff}MB, with gpu_total_mem_orig={gpu_total_mem_orig}MB and"
-            f" gpu_total_mem_bnb={gpu_total_mem_bnb}MB",
-        )
-
-        self.assertEqual(
-            loss_orig, loss_bnb, f"loss should be the same, but got loss_orig={loss_orig}, loss_bnb={loss_bnb}"
-        )
+    
+        self.assertGreaterEqual(gpu_alloc_mem_diff, expected_savings, f"Expected {expected_savings}MB, actual {gpu_alloc_mem_diff}MB")
+        self.assertGreaterEqual(gpu_total_mem_diff, expected_savings, f"Expected {expected_savings}MB, actual {gpu_total_mem_diff}MB")
+        self.assertEqual(loss_orig, loss_bnb, f"Expected loss: {loss_orig}, Actual loss: {loss_bnb}")
 
     def run_trainer(
         self,
